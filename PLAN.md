@@ -42,13 +42,22 @@ using it is just risk with no benefit.
 
 ## Milestones
 
-- **M0 — App shell** *(current)*: Owner auth (email/password + Google, no
+- **M0 — App shell** *(done)*: Owner auth (email/password + Google, no
   public sign-up), Postgres schema, private-storage-ready structure, static
   11-section dashboard shell with honest empty/placeholder states. No AI
   calls.
-- **M1 — Vertical slice**: idea → script → 1-scene storyboard → 1 TTS voice
-  → 1 AI image/video scene → assembled export → downloadable package.
-  Introduces the worker + job queue.
+- **M1 — Vertical slice** *(in progress)*: idea → script → 1-scene storyboard
+  → 1 TTS voice → 1 AI image/video scene → assembled export → downloadable
+  package. **Idea → script leg is done**: Create Video has a real form
+  (idea/platform/mode), a `ScriptProvider` adapter interface with an
+  `AnthropicScriptProvider` implementation (Section 18-style — swapping
+  script providers later won't touch this form or the server action), and
+  `script`/`generation_job` tables track output and status. Gated honestly —
+  if `ANTHROPIC_API_KEY` isn't set, the form says so and disables submit
+  rather than faking success. Not yet built: storyboard/scene breakdown, TTS,
+  image/video generation, export, and the worker + job queue (still fine to
+  run script generation directly in the request for now — only needed once a
+  step takes long enough to want to survive a browser close).
 - **M2**: Multi-scene projects, simple editor, captions, cost-estimate-then-
   confirm flow before any paid generation.
 - **M3**: Character Library + consistency test workflow.

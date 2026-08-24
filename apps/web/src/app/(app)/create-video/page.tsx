@@ -1,10 +1,28 @@
-import { PlannedSection } from "../planned-section";
+import { scriptProvider } from "@/lib/providers";
+import { PLATFORMS } from "@/lib/validation";
+import { CreateVideoForm } from "./create-video-form";
 
-export default function CreateVideoPage() {
+export default async function CreateVideoPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ platform?: string }>;
+}) {
+  const { platform } = await searchParams;
+  const defaultPlatform = PLATFORMS.find((p) => p === platform) ?? PLATFORMS[0];
+
   return (
-    <PlannedSection
-      title="Create Video"
-      description="Quick, Guided, and Studio Mode creation will land in a later milestone, once script generation and the video/voice provider adapters are wired up."
-    />
+    <div className="flex flex-col gap-6">
+      <div>
+        <h1 className="text-2xl font-semibold">Create Video</h1>
+        <p className="mt-1 text-sm text-muted">
+          This writes a script from your idea. Storyboard, voice, and visuals come next — not wired
+          up yet.
+        </p>
+      </div>
+      <CreateVideoForm
+        scriptProviderConfigured={scriptProvider.isConfigured()}
+        defaultPlatform={defaultPlatform}
+      />
+    </div>
   );
 }

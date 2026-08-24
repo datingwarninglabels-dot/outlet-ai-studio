@@ -85,6 +85,37 @@ export const projects = pgTable("project", {
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
 
+export const scripts = pgTable("script", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  projectId: uuid("project_id")
+    .notNull()
+    .references(() => projects.id, { onDelete: "cascade" }),
+  content: text("content").notNull(),
+  status: text("status").notNull().default("draft"),
+  provider: text("provider").notNull(),
+  model: text("model").notNull(),
+  promptTokens: integer("prompt_tokens"),
+  completionTokens: integer("completion_tokens"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const generationJobs = pgTable("generation_job", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  projectId: uuid("project_id")
+    .notNull()
+    .references(() => projects.id, { onDelete: "cascade" }),
+  type: text("type").notNull(),
+  provider: text("provider").notNull(),
+  model: text("model"),
+  status: text("status").notNull().default("queued"),
+  params: jsonb("params"),
+  estimatedCostCents: integer("estimated_cost_cents"),
+  actualCostCents: integer("actual_cost_cents"),
+  error: text("error"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
 export const auditEvents = pgTable("audit_event", {
   id: uuid("id").primaryKey().defaultRandom(),
   userId: text("user_id").references(() => users.id, {

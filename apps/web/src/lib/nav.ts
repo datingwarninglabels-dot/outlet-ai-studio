@@ -8,8 +8,8 @@ export type NavItem = {
 
 export const NAV_ITEMS: NavItem[] = [
   { label: "Dashboard", href: "/dashboard", status: "live" },
-  { label: "Create Video", href: "/create-video", status: "planned" },
-  { label: "Projects", href: "/projects", status: "planned" },
+  { label: "Create Video", href: "/create-video", status: "live" },
+  { label: "Projects", href: "/projects", status: "live" },
   { label: "Character Library", href: "/characters", status: "planned" },
   { label: "World Library", href: "/worlds", status: "planned" },
   { label: "Voice Studio", href: "/voice-studio", status: "planned" },

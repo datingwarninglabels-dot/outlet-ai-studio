@@ -1,25 +1,29 @@
+import Link from "next/link";
+import { desc, eq } from "drizzle-orm";
 import { auth } from "@/auth";
 import { db } from "@/db";
-import { projects } from "@/db/schema";
-import { eq, desc } from "drizzle-orm";
-
-const QUICK_CREATE = [
-  "TikTok",
-  "YouTube Short",
-  "YouTube Video",
-  "Facebook Reel",
-  "Instagram Reel",
-  "Custom Project",
-];
+import { generationJobs, projects } from "@/db/schema";
+import { PLATFORMS } from "@/lib/validation";
 
 export default async function DashboardPage() {
   const session = await auth();
+
   const recentProjects = session?.user
     ? await db
         .select()
         .from(projects)
         .where(eq(projects.ownerId, session.user.id))
         .orderBy(desc(projects.updatedAt))
+        .limit(5)
+    : [];
+
+  const recentJobs = session?.user
+    ? await db
+        .select({ job: generationJobs, project: projects })
+        .from(generationJobs)
+        .innerJoin(projects, eq(generationJobs.projectId, projects.id))
+        .where(eq(projects.ownerId, session.user.id))
+        .orderBy(desc(generationJobs.updatedAt))
         .limit(5)
     : [];
 
@@ -33,38 +37,25 @@ export default async function DashboardPage() {
       </div>
 
       <section className="flex flex-col gap-3">
-        <label htmlFor="idea" className="text-sm font-medium">
+        <Link
+          href="/create-video"
+          className="flex h-11 w-fit items-center rounded-lg bg-gradient-to-r from-accent-purple via-accent-blue to-accent-teal px-5 text-sm font-medium text-black"
+        >
           What do you want to create?
-        </label>
-        <div className="flex flex-col gap-2 sm:flex-row">
-          <input
-            id="idea"
-            disabled
-            placeholder="Creation is wired up in a later milestone"
-            className="h-11 flex-1 rounded-lg border border-border bg-surface px-3 text-sm text-muted outline-none disabled:cursor-not-allowed"
-          />
-          <button
-            type="button"
-            disabled
-            className="h-11 shrink-0 rounded-lg border border-border px-4 text-sm text-muted disabled:cursor-not-allowed"
-          >
-            Start
-          </button>
-        </div>
+        </Link>
       </section>
 
       <section className="flex flex-col gap-3">
         <h2 className="text-sm font-medium text-muted">Quick create</h2>
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-          {QUICK_CREATE.map((platform) => (
-            <div
+          {PLATFORMS.map((platform) => (
+            <Link
               key={platform}
-              aria-disabled
-              className="flex min-h-24 flex-col justify-between rounded-lg border border-border bg-surface p-4 opacity-60"
+              href={`/create-video?platform=${encodeURIComponent(platform)}`}
+              className="flex min-h-24 flex-col justify-between rounded-lg border border-border bg-surface p-4 hover:bg-surface-raised"
             >
               <span className="text-sm font-medium">{platform}</span>
-              <span className="text-[10px] uppercase tracking-wide text-muted">Soon</span>
-            </div>
+            </Link>
           ))}
         </div>
       </section>
@@ -73,16 +64,24 @@ export default async function DashboardPage() {
         <h2 className="text-sm font-medium text-muted">Recent projects</h2>
         {recentProjects.length === 0 ? (
           <p className="rounded-lg border border-dashed border-border p-6 text-sm text-muted">
-            No projects yet. Project creation ships with the first Create Video milestone.
+            No projects yet.{" "}
+            <Link href="/create-video" className="text-accent-teal">
+              Start one in Create Video.
+            </Link>
           </p>
         ) : (
           <ul className="flex flex-col gap-2">
             {recentProjects.map((project) => (
-              <li
-                key={project.id}
-                className="rounded-lg border border-border bg-surface p-4 text-sm"
-              >
-                {project.title}
+              <li key={project.id}>
+                <Link
+                  href={`/projects/${project.id}`}
+                  className="flex items-center justify-between rounded-lg border border-border bg-surface p-4 text-sm hover:bg-surface-raised"
+                >
+                  <span>{project.title}</span>
+                  <span className="text-xs uppercase tracking-wide text-muted">
+                    {project.status}
+                  </span>
+                </Link>
               </li>
             ))}
           </ul>
@@ -91,9 +90,35 @@ export default async function DashboardPage() {
 
       <section className="flex flex-col gap-3">
         <h2 className="text-sm font-medium text-muted">Generation jobs</h2>
-        <p className="rounded-lg border border-dashed border-border p-6 text-sm text-muted">
-          No jobs yet. The background job system ships alongside real generation.
-        </p>
+        {recentJobs.length === 0 ? (
+          <p className="rounded-lg border border-dashed border-border p-6 text-sm text-muted">
+            No jobs yet.
+          </p>
+        ) : (
+          <ul className="flex flex-col gap-2">
+            {recentJobs.map(({ job, project }) => (
+              <li
+                key={job.id}
+                className="flex items-center justify-between rounded-lg border border-border bg-surface p-4 text-sm"
+              >
+                <span>
+                  {job.type} · {project.title}
+                </span>
+                <span
+                  className={
+                    job.status === "failed"
+                      ? "text-red-400"
+                      : job.status === "succeeded"
+                        ? "text-accent-teal"
+                        : "text-muted"
+                  }
+                >
+                  {job.status}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
       </section>
     </div>
   );

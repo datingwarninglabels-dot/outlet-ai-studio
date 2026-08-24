@@ -15,6 +15,13 @@
       "when": 1787550917424,
       "tag": "0001_illegal_virginia_dare",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1787552895282,
+      "tag": "0002_acoustic_gwen_stacy",
+      "breakpoints": true
     }
   ]
 }

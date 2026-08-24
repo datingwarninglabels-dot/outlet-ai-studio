@@ -2,7 +2,9 @@ import { and, desc, eq } from "drizzle-orm";
 import { notFound } from "next/navigation";
 import { auth } from "@/auth";
 import { db } from "@/db";
-import { generationJobs, projects, scripts } from "@/db/schema";
+import { generationJobs, projects, scenes, scripts } from "@/db/schema";
+import { storyboardProvider } from "@/lib/providers";
+import { GenerateStoryboardForm, SceneEditForm } from "./scene-form";
 
 export default async function ProjectDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -26,6 +28,13 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
     .from(scripts)
     .where(eq(scripts.projectId, project.id))
     .orderBy(desc(scripts.createdAt))
+    .limit(1);
+
+  const [scene] = await db
+    .select()
+    .from(scenes)
+    .where(eq(scenes.projectId, project.id))
+    .orderBy(desc(scenes.createdAt))
     .limit(1);
 
   const jobs = await db
@@ -57,6 +66,41 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
           <p className="rounded-lg border border-dashed border-border p-6 text-sm text-muted">
             No script generated yet.
           </p>
+        )}
+      </section>
+
+      <section className="flex flex-col gap-3">
+        <h2 className="text-sm font-medium text-muted">Storyboard</h2>
+        {scene ? (
+          <SceneEditForm
+            projectId={project.id}
+            scene={{
+              id: scene.id,
+              narration: scene.narration,
+              visualDescription: scene.visualDescription,
+              durationSeconds: scene.durationSeconds,
+              provider: scene.provider,
+              model: scene.model,
+            }}
+          />
+        ) : (
+          <div className="flex flex-col gap-3 rounded-lg border border-dashed border-border p-6">
+            <p className="text-sm text-muted">
+              No storyboard yet. This turns the script into a single scene — narration, a visual
+              description, and an estimated duration — that you can edit before voice or visuals are
+              generated from it.
+            </p>
+            <GenerateStoryboardForm
+              projectId={project.id}
+              disabledReason={
+                !script
+                  ? "Generate a script first — the storyboard is built from it."
+                  : !storyboardProvider.isConfigured()
+                    ? "Storyboard generation isn't connected yet — add ANTHROPIC_API_KEY to your environment and restart the app."
+                    : null
+              }
+            />
+          </div>
         )}
       </section>
 
@@ -93,8 +137,8 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
       </section>
 
       <p className="text-xs text-muted">
-        Storyboard, voice, visuals, and export aren&apos;t wired up yet — this page only shows what
-        Create Video has produced so far.
+        Voice, visuals, and export aren&apos;t wired up yet — this page shows what Create Video and
+        the storyboard step have produced so far.
       </p>
     </div>
   );

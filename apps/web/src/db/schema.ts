@@ -99,6 +99,22 @@ export const scripts = pgTable("script", {
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
+export const scenes = pgTable("scene", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  projectId: uuid("project_id")
+    .notNull()
+    .references(() => projects.id, { onDelete: "cascade" }),
+  order: integer("order").notNull().default(0),
+  narration: text("narration").notNull(),
+  visualDescription: text("visual_description").notNull(),
+  durationSeconds: integer("duration_seconds"),
+  status: text("status").notNull().default("draft"),
+  provider: text("provider"),
+  model: text("model"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
 export const generationJobs = pgTable("generation_job", {
   id: uuid("id").primaryKey().defaultRandom(),
   projectId: uuid("project_id")

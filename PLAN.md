@@ -54,10 +54,18 @@ using it is just risk with no benefit.
   script providers later won't touch this form or the server action), and
   `script`/`generation_job` tables track output and status. Gated honestly —
   if `ANTHROPIC_API_KEY` isn't set, the form says so and disables submit
-  rather than faking success. Not yet built: storyboard/scene breakdown, TTS,
-  image/video generation, export, and the worker + job queue (still fine to
-  run script generation directly in the request for now — only needed once a
-  step takes long enough to want to survive a browser close).
+  rather than faking success. **Script → 1-scene storyboard leg is done**:
+  the project detail page can turn the generated script into a single scene
+  (narration, a visual-generation-ready description, an estimated duration)
+  via a `StoryboardProvider`/`AnthropicStoryboardProvider` adapter mirroring
+  the script provider's shape, backed by a new `scene` table (with an
+  `order` column so M2's multi-scene breakdown doesn't need a schema
+  rework). The scene is manually editable and re-saveable before anything
+  downstream uses it, and generation is gated the same honest way as script
+  generation. Not yet built: TTS, image/video generation, export, and the
+  worker + job queue (still fine to run generation directly in the request
+  for now — only needed once a step takes long enough to want to survive a
+  browser close).
 - **M2**: Multi-scene projects, simple editor, captions, cost-estimate-then-
   confirm flow before any paid generation.
 - **M3**: Character Library + consistency test workflow.

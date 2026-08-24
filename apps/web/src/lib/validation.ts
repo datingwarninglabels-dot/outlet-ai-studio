@@ -25,3 +25,10 @@ export const createVideoSchema = z.object({
   platform: z.enum(PLATFORMS),
   mode: z.enum(["quick", "guided", "studio"]),
 });
+
+export const sceneUpdateSchema = z.object({
+  sceneId: z.string().uuid(),
+  narration: z.string().min(1).max(4000),
+  visualDescription: z.string().min(1).max(2000),
+  durationSeconds: z.coerce.number().int().min(1).max(3600),
+});

@@ -28,7 +28,9 @@ function buildPrompt(input: StoryboardGenerationInput): string {
   return `Platform: ${input.platform}\n\nScript:\n${input.script}`;
 }
 
-function isValidSceneEntry(entry: unknown): entry is StoryboardScene {
+// Exported for unit testing (see anthropic-storyboard-provider.test.ts) —
+// pure functions, safe to test directly without mocking the Anthropic SDK.
+export function isValidSceneEntry(entry: unknown): entry is StoryboardScene {
   return (
     typeof entry === "object" &&
     entry !== null &&
@@ -39,7 +41,7 @@ function isValidSceneEntry(entry: unknown): entry is StoryboardScene {
   );
 }
 
-function normalizeScene(scene: StoryboardScene): StoryboardScene {
+export function normalizeScene(scene: StoryboardScene): StoryboardScene {
   return {
     narration: scene.narration,
     visualDescription: scene.visualDescription,
@@ -56,7 +58,7 @@ function normalizeScene(scene: StoryboardScene): StoryboardScene {
  * balances its own braces from the start of the array, close the array
  * there, and parse that. Returns null if even that recovery fails.
  */
-function recoverTruncatedArray(raw: string): StoryboardScene[] | null {
+export function recoverTruncatedArray(raw: string): StoryboardScene[] | null {
   const arrayStart = raw.indexOf("[");
   if (arrayStart === -1) {
     return null;
@@ -110,7 +112,10 @@ function recoverTruncatedArray(raw: string): StoryboardScene[] | null {
   return null;
 }
 
-function parseScenes(raw: string, hitTokenLimit: boolean): { scenes: StoryboardScene[]; truncated: boolean } {
+export function parseScenes(
+  raw: string,
+  hitTokenLimit: boolean,
+): { scenes: StoryboardScene[]; truncated: boolean } {
   try {
     const parsed: unknown = JSON.parse(raw);
     if (!Array.isArray(parsed) || parsed.length === 0 || !parsed.every(isValidSceneEntry)) {

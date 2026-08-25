@@ -228,7 +228,53 @@ using it is just risk with no benefit.
     pull character references into per-scene image prompts); Provider
     Hub's spend rollup still joins `usage_costs` to `projects` only, so
     character-scoped spend doesn't appear there yet.
-- **M3**: World Library + Continuity Checker.
+- **M3 — World Library + Continuity Checker** *(done)*:
+  - **World Library**: reusable settings mirroring Character Library's
+    architecture — locked location, props/vehicles, typical outfits/
+    accessories, lighting/color palette, camera/lens style, animation/
+    realism style, time of day, weather, negative prompt. Reference images
+    upload or generate (establishing + detail pair via Runway
+    `referenceImages`, plus a cheap consistency test), approve/reject the
+    same way. Character assignments (`world_character` join table) track
+    which characters typically appear in a world — voice comes along for
+    free via `character.assignedVoiceId`, no separate field needed.
+  - **Scene assignment**: `scene.characterId`/`worldId` (nullable,
+    set-null on delete) let a scene opt into a character and/or world.
+    Visual generation for an assigned scene appends the locked
+    appearance/setting details to the prompt and passes the character's/
+    world's approved reference image to Runway (tagged IDENTITY/SETTING),
+    the same mechanism Character/World Library's own reference generation
+    already uses.
+  - **Continuity Checker**: after an assigned scene's visual generates, a
+    Claude Sonnet vision call (`lib/continuity-checker.ts`) compares the
+    image against the same locked-details text used to build the prompt
+    and returns a strict-JSON list of mismatches (faces, hair, clothing,
+    props, locations, lighting, per Section 11). Warnings surface under
+    the scene's visual with an "Approve — this change was intentional"
+    action (`continuityChecks.acknowledgedAt`). Best-effort by design —
+    wrapped in its own try/catch after the visual is already uploaded, so
+    a missing `ANTHROPIC_API_KEY` or a failed vision call never
+    invalidates an already-successful, already-paid-for image generation.
+    Cost is bundled into the same visual-generation confirm step rather
+    than a second gate, via `estimateContinuityCheckCostCents()` — openly
+    labeled as an approximate flat estimate, since Claude's image
+    tokenization by resolution wasn't precisely verified here.
+  - `characterAppearanceSummary()`/`worldSettingSummary()` were factored
+    out of `buildCharacterPrompt`/`buildWorldPrompt` so the same
+    locked-details text feeds character/world reference generation, the
+    scene visual prompt, *and* the continuity check itself — the checker
+    is always comparing against exactly what was asked for, not a
+    separately-maintained description.
+  - Verified: `npm run build` (TypeScript strict, zero errors — both
+    migrations generated cleanly on the first pass, reviewed as purely
+    additive) and `npm run lint`, both clean. Not live-tested (same
+    sandbox DB limitation as the rest of this project; no real vision
+    round-trip exercised either).
+  - Deliberately out of scope: multi-character-per-scene (Section 10 asks
+    for support beyond one character per scene — position/action/emotion/
+    lip-sync per character); the pre-render still-preview step Section 10
+    also asks for; any UI to browse historical/acknowledged continuity
+    checks (only the latest open one per scene surfaces).
 - **M4**: Long-form resilience — resumable/retryable/idempotent scene-by-
   scene rendering at higher scene counts than tested so far.
 - **M5**: Brand Kit.

@@ -28,13 +28,26 @@ import { THUMBNAIL_STYLES, thumbnailTextSchema } from "@/lib/validation";
 
 type ActionState = { error: string };
 
-async function getOwnedJob(jobId: string, userId: string) {
+// generation_jobs.projectId is nullable at the schema level (Character
+// Library jobs use characterId instead) — this file only ever deals with
+// project-scoped jobs, so narrow once here rather than at every use site.
+type ProjectJob = typeof generationJobs.$inferSelect & { projectId: string };
+
+function asProjectJob(job: typeof generationJobs.$inferSelect): ProjectJob {
+  if (!job.projectId) {
+    throw new Error("Job is missing a project id.");
+  }
+  return job as ProjectJob;
+}
+
+async function getOwnedJob(jobId: string, userId: string): Promise<ProjectJob> {
   const [job] = await db.select().from(generationJobs).where(eq(generationJobs.id, jobId)).limit(1);
   if (!job) {
     throw new Error("Job not found.");
   }
-  await loadOwnedProject(job.projectId, userId);
-  return job;
+  const projectJob = asProjectJob(job);
+  await loadOwnedProject(projectJob.projectId, userId);
+  return projectJob;
 }
 
 function buildPrompt(projectTitle: string, sceneVisual: string | null, styleModifier: string): string {
@@ -93,7 +106,7 @@ export async function requestThumbnails(_prev: ActionState, formData: FormData):
   return { error: "" };
 }
 
-async function executeThumbnailJob(job: typeof generationJobs.$inferSelect): Promise<string | null> {
+async function executeThumbnailJob(job: ProjectJob): Promise<string | null> {
   const params = job.params as { styles: string[]; platform: string };
 
   const doneStyles = new Set(
@@ -216,7 +229,7 @@ export async function confirmThumbnails(_prev: ActionState, formData: FormData):
     return { error: "" };
   }
 
-  const error = await executeThumbnailJob(confirmed);
+  const error = await executeThumbnailJob(asProjectJob(confirmed));
   revalidatePath(`/projects/${job.projectId}`);
   return { error: error ?? "" };
 }
@@ -326,7 +339,7 @@ export async function getThumbnailImageUrl(mediaAssetId: string): Promise<string
   }
 
   const [asset] = await db.select().from(mediaAssets).where(eq(mediaAssets.id, mediaAssetId)).limit(1);
-  if (!asset) {
+  if (!asset || !asset.projectId) {
     throw new Error("Media asset not found.");
   }
   await loadOwnedProject(asset.projectId, session.user.id);

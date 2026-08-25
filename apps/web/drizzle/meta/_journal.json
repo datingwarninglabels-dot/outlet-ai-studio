@@ -57,6 +57,27 @@
       "when": 1787626566490,
       "tag": "0007_previous_fantastic_four",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1787627245655,
+      "tag": "0008_parched_mantis",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1787627352049,
+      "tag": "0009_same_thing",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1787627541260,
+      "tag": "0010_lovely_doctor_spectrum",
+      "breakpoints": true
     }
   ]
 }

@@ -49,3 +49,42 @@ export const thumbnailTextSchema = z.object({
   thumbnailId: z.string().uuid(),
   headlineText: z.string().max(120),
 });
+
+const optionalField = z
+  .string()
+  .max(300)
+  .optional()
+  .transform((v) => (v?.trim() ? v.trim() : null));
+
+export const characterSchema = z
+  .object({
+    name: z.string().min(1).max(100),
+    description: z.string().min(1).max(1000),
+    face: optionalField,
+    skinTone: optionalField,
+    hair: optionalField,
+    bodyType: optionalField,
+    apparentAge: optionalField,
+    distinguishingDetails: optionalField,
+    defaultClothing: optionalField,
+    accessories: optionalField,
+    palette: optionalField,
+    negativePrompt: z
+      .string()
+      .max(500)
+      .optional()
+      .transform((v) => (v?.trim() ? v.trim() : null)),
+    assignedVoiceId: optionalField,
+    isRealPerson: z.boolean(),
+    permissionNotes: z
+      .string()
+      .max(1000)
+      .optional()
+      .transform((v) => (v?.trim() ? v.trim() : null)),
+  })
+  // Section 10: real-person characters require documented permission — enforced
+  // here, not just left to the UI, since this is a safety requirement.
+  .refine((data) => !data.isRealPerson || Boolean(data.permissionNotes), {
+    message: "Real-person characters require documented permission notes.",
+    path: ["permissionNotes"],
+  });

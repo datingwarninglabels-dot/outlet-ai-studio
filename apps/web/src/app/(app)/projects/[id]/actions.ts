@@ -46,20 +46,35 @@ const ASSUMED_STORYBOARD_OUTPUT_TOKENS = 1500;
 
 type ActionState = { error: string };
 
-async function getOwnedJob(jobId: string, userId: string) {
+// generation_jobs.projectId is nullable at the schema level (Character
+// Library jobs use characterId instead) — everything in this file only
+// ever deals with project-scoped jobs, so narrow to a non-null projectId
+// once, right where a job enters this file's functions, rather than
+// re-deriving it at every job.projectId use site.
+type ProjectJob = typeof generationJobs.$inferSelect & { projectId: string };
+
+function asProjectJob(job: typeof generationJobs.$inferSelect): ProjectJob {
+  if (!job.projectId) {
+    throw new Error("Job is missing a project id.");
+  }
+  return job as ProjectJob;
+}
+
+async function getOwnedJob(jobId: string, userId: string): Promise<ProjectJob> {
   const [job] = await db.select().from(generationJobs).where(eq(generationJobs.id, jobId)).limit(1);
   if (!job) {
     throw new Error("Job not found.");
   }
-  await loadOwnedProject(job.projectId, userId);
-  return job;
+  const projectJob = asProjectJob(job);
+  await loadOwnedProject(projectJob.projectId, userId);
+  return projectJob;
 }
 
 // --- Script: confirm/cancel/retry. Requesting the job (with its cost
 // estimate) happens in create-video/actions.ts since that's also where the
 // project itself is created; the Owner confirms here, on the project page. ---
 
-async function executeScriptJob(job: typeof generationJobs.$inferSelect): Promise<string | null> {
+async function executeScriptJob(job: ProjectJob): Promise<string | null> {
   const stepId = await startStep(job.id, "generate_script", 0);
 
   try {
@@ -105,7 +120,7 @@ export async function confirmScript(_prev: ActionState, formData: FormData): Pro
     return { error: "" };
   }
 
-  const error = await executeScriptJob(confirmed);
+  const error = await executeScriptJob(asProjectJob(confirmed));
   revalidatePath(`/projects/${job.projectId}`);
   return { error: error ?? "" };
 }
@@ -198,7 +213,7 @@ export async function requestStoryboard(
   return { error: "" };
 }
 
-async function executeStoryboardJob(job: typeof generationJobs.$inferSelect): Promise<string | null> {
+async function executeStoryboardJob(job: ProjectJob): Promise<string | null> {
   const stepId = await startStep(job.id, "generate_storyboard", 0);
 
   try {
@@ -255,7 +270,7 @@ export async function confirmStoryboard(
     return { error: "" };
   }
 
-  const error = await executeStoryboardJob(confirmed);
+  const error = await executeStoryboardJob(asProjectJob(confirmed));
   revalidatePath(`/projects/${job.projectId}`);
   return { error: error ?? "" };
 }
@@ -357,7 +372,7 @@ export async function requestVoice(_prev: ActionState, formData: FormData): Prom
   return { error: "" };
 }
 
-async function executeVoiceJob(job: typeof generationJobs.$inferSelect): Promise<string | null> {
+async function executeVoiceJob(job: ProjectJob): Promise<string | null> {
   const stepId = await startStep(job.id, "generate_voice", 0);
 
   try {
@@ -409,7 +424,7 @@ export async function confirmVoice(_prev: ActionState, formData: FormData): Prom
     return { error: "" };
   }
 
-  const error = await executeVoiceJob(confirmed);
+  const error = await executeVoiceJob(asProjectJob(confirmed));
   revalidatePath(`/projects/${job.projectId}`);
   return { error: error ?? "" };
 }
@@ -452,7 +467,7 @@ export async function getVoicePlaybackUrl(mediaAssetId: string): Promise<string>
   }
 
   const [asset] = await db.select().from(mediaAssets).where(eq(mediaAssets.id, mediaAssetId)).limit(1);
-  if (!asset) {
+  if (!asset || !asset.projectId) {
     throw new Error("Media asset not found.");
   }
   await loadOwnedProject(asset.projectId, session.user.id);
@@ -538,7 +553,7 @@ export async function requestVisual(_prev: ActionState, formData: FormData): Pro
  * partway through a batch doesn't lose completed scenes or re-charge for
  * them.
  */
-async function executeVisualJob(job: typeof generationJobs.$inferSelect): Promise<string | null> {
+async function executeVisualJob(job: ProjectJob): Promise<string | null> {
   const params = job.params as { sceneIds: string[]; ratio: string };
 
   const doneAssets = await db
@@ -616,7 +631,7 @@ export async function confirmVisual(_prev: ActionState, formData: FormData): Pro
     return { error: "" };
   }
 
-  const error = await executeVisualJob(confirmed);
+  const error = await executeVisualJob(asProjectJob(confirmed));
   revalidatePath(`/projects/${job.projectId}`);
   return { error: error ?? "" };
 }
@@ -659,7 +674,7 @@ export async function getVisualUrl(mediaAssetId: string): Promise<string> {
   }
 
   const [asset] = await db.select().from(mediaAssets).where(eq(mediaAssets.id, mediaAssetId)).limit(1);
-  if (!asset) {
+  if (!asset || !asset.projectId) {
     throw new Error("Media asset not found.");
   }
   await loadOwnedProject(asset.projectId, session.user.id);
@@ -750,7 +765,7 @@ export async function requestAnimation(_prev: ActionState, formData: FormData): 
   return { error: "" };
 }
 
-async function executeAnimationJob(job: typeof generationJobs.$inferSelect): Promise<string | null> {
+async function executeAnimationJob(job: ProjectJob): Promise<string | null> {
   const params = job.params as { sceneIds: string[]; ratio: string };
 
   const doneAssets = await db
@@ -843,7 +858,7 @@ export async function confirmAnimation(_prev: ActionState, formData: FormData): 
     return { error: "" };
   }
 
-  const error = await executeAnimationJob(confirmed);
+  const error = await executeAnimationJob(asProjectJob(confirmed));
   revalidatePath(`/projects/${job.projectId}`);
   return { error: error ?? "" };
 }
@@ -886,7 +901,7 @@ export async function getAnimationUrl(mediaAssetId: string): Promise<string> {
   }
 
   const [asset] = await db.select().from(mediaAssets).where(eq(mediaAssets.id, mediaAssetId)).limit(1);
-  if (!asset) {
+  if (!asset || !asset.projectId) {
     throw new Error("Media asset not found.");
   }
   await loadOwnedProject(asset.projectId, session.user.id);
@@ -981,7 +996,7 @@ export async function requestAssembly(_prev: ActionState, formData: FormData): P
   return { error: "" };
 }
 
-async function executeAssemblyJob(job: typeof generationJobs.$inferSelect): Promise<string | null> {
+async function executeAssemblyJob(job: ProjectJob): Promise<string | null> {
   const stepId = await startStep(job.id, "assemble_video", 0);
 
   try {
@@ -1086,7 +1101,7 @@ export async function confirmAssembly(_prev: ActionState, formData: FormData): P
     return { error: "" };
   }
 
-  const error = await executeAssemblyJob(confirmed);
+  const error = await executeAssemblyJob(asProjectJob(confirmed));
   revalidatePath(`/projects/${job.projectId}`);
   return { error: error ?? "" };
 }
@@ -1129,7 +1144,7 @@ export async function getFinalVideoUrl(mediaAssetId: string): Promise<string> {
   }
 
   const [asset] = await db.select().from(mediaAssets).where(eq(mediaAssets.id, mediaAssetId)).limit(1);
-  if (!asset) {
+  if (!asset || !asset.projectId) {
     throw new Error("Media asset not found.");
   }
   await loadOwnedProject(asset.projectId, session.user.id);

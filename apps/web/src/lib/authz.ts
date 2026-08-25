@@ -1,6 +1,6 @@
 import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
-import { projects } from "@/db/schema";
+import { characters, projects } from "@/db/schema";
 
 export async function loadOwnedProject(projectId: string, ownerId: string) {
   const [project] = await db
@@ -14,4 +14,18 @@ export async function loadOwnedProject(projectId: string, ownerId: string) {
   }
 
   return project;
+}
+
+export async function loadOwnedCharacter(characterId: string, ownerId: string) {
+  const [character] = await db
+    .select()
+    .from(characters)
+    .where(and(eq(characters.id, characterId), eq(characters.ownerId, ownerId)))
+    .limit(1);
+
+  if (!character) {
+    throw new Error("Character not found.");
+  }
+
+  return character;
 }

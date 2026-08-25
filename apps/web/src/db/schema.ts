@@ -134,9 +134,12 @@ export const scenes = pgTable("scene", {
 
 export const generationJobs = pgTable("generation_job", {
   id: uuid("id").primaryKey().defaultRandom(),
-  projectId: uuid("project_id")
-    .notNull()
-    .references(() => projects.id, { onDelete: "cascade" }),
+  // Exactly one of projectId/characterId is set, enforced in code (not a DB
+  // constraint) — most jobs belong to a project; Character Library jobs
+  // (character sheets, consistency tests) belong to a character instead,
+  // since characters are reusable across projects and don't have one.
+  projectId: uuid("project_id").references(() => projects.id, { onDelete: "cascade" }),
+  characterId: uuid("character_id").references(() => characters.id, { onDelete: "cascade" }),
   type: text("type").notNull(),
   provider: text("provider").notNull(),
   model: text("model"),
@@ -180,9 +183,8 @@ export const usageCosts = pgTable("usage_cost", {
     .notNull()
     .references(() => generationJobs.id, { onDelete: "cascade" })
     .unique(),
-  projectId: uuid("project_id")
-    .notNull()
-    .references(() => projects.id, { onDelete: "cascade" }),
+  projectId: uuid("project_id").references(() => projects.id, { onDelete: "cascade" }),
+  characterId: uuid("character_id").references(() => characters.id, { onDelete: "cascade" }),
   provider: text("provider").notNull(),
   estimatedCostCents: integer("estimated_cost_cents").notNull(),
   confirmedAt: timestamp("confirmed_at"),
@@ -196,9 +198,9 @@ export const usageCosts = pgTable("usage_cost", {
 // URLs — see storage.ts / s3-storage-provider.ts.
 export const mediaAssets = pgTable("media_asset", {
   id: uuid("id").primaryKey().defaultRandom(),
-  projectId: uuid("project_id")
-    .notNull()
-    .references(() => projects.id, { onDelete: "cascade" }),
+  // Nullable: character reference/sheet images (Character Library) are
+  // reusable across projects, so they aren't tied to one.
+  projectId: uuid("project_id").references(() => projects.id, { onDelete: "cascade" }),
   jobId: uuid("job_id").references(() => generationJobs.id, { onDelete: "set null" }),
   sceneId: uuid("scene_id").references(() => scenes.id, { onDelete: "set null" }),
   type: text("type").notNull(),
@@ -233,6 +235,56 @@ export const thumbnails = pgTable("thumbnail", {
   }),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+// Reusable across projects (Section 10) — not scoped to one project, only
+// to the Owner. appearanceData fields are "locked" attributes referenced
+// when building generation prompts, so identity stays consistent across
+// separately-generated images.
+export const characters = pgTable("character", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  ownerId: text("owner_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  name: text("name").notNull(),
+  description: text("description").notNull(),
+  face: text("face"),
+  skinTone: text("skin_tone"),
+  hair: text("hair"),
+  bodyType: text("body_type"),
+  apparentAge: text("apparent_age"),
+  distinguishingDetails: text("distinguishing_details"),
+  defaultClothing: text("default_clothing"),
+  accessories: text("accessories"),
+  palette: text("palette"),
+  negativePrompt: text("negative_prompt"),
+  // Free-text ElevenLabs voice ID override — there's no Voice Library UI to
+  // pick from yet (Section 13), so this just stores whatever ID the Owner
+  // has from their ElevenLabs account.
+  assignedVoiceId: text("assigned_voice_id"),
+  // Real-person permission gate (Section 10): enforced in code
+  // (character-actions.ts), not just the schema — isRealPerson=true
+  // requires non-empty permissionNotes before the character can be saved.
+  isRealPerson: boolean("is_real_person").notNull().default(false),
+  permissionNotes: text("permission_notes"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+export const characterReferences = pgTable("character_reference", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  characterId: uuid("character_id")
+    .notNull()
+    .references(() => characters.id, { onDelete: "cascade" }),
+  mediaAssetId: uuid("media_asset_id")
+    .notNull()
+    .references(() => mediaAssets.id, { onDelete: "cascade" }),
+  jobId: uuid("job_id").references(() => generationJobs.id, { onDelete: "set null" }),
+  // "uploaded" | "front" | "side" | "close_up" | "full_body" | "consistency_test"
+  viewType: text("view_type").notNull(),
+  source: text("source").notNull(), // "upload" | "generated"
+  approved: boolean("approved").notNull().default(false),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
 export const auditEvents = pgTable("audit_event", {

@@ -19,6 +19,7 @@ export class RunwayImageProvider implements ImageProvider {
       model: MODEL,
       promptText: input.prompt,
       ratio: input.ratio,
+      ...(input.referenceImages?.length ? { referenceImages: input.referenceImages } : {}),
     });
 
     const task = await runwayPollUntilComplete(id);

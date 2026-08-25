@@ -36,7 +36,7 @@ import {
 } from "./actions";
 import { GenerateAnimationForm } from "./animation-form";
 import { GenerateAssemblyForm } from "./assembly-form";
-import { JobConfirmCard, StalledJobCard } from "./job-cards";
+import { JobConfirmCard, StalledJobCard } from "@/components/job-cards";
 import { GenerateStoryboardForm, SceneEditForm } from "./scene-form";
 import { cancelThumbnails, confirmThumbnails, getThumbnailImageUrl, retryThumbnails } from "./thumbnail-actions";
 import { GenerateThumbnailsForm, ThumbnailCard } from "./thumbnail-form";

@@ -14,19 +14,21 @@ export function isStalled(job: { status: string; lastHeartbeatAt: Date }): boole
  * submitted — a double-click or retried form submit never creates a second
  * job. The cost estimate is written once, on first creation only.
  */
-export async function requestJob(input: {
-  projectId: string;
-  type: string;
-  provider: string;
-  model: string | null;
-  idempotencyKey: string;
-  params: unknown;
-  estimatedCostCents: number;
-}) {
+export async function requestJob(
+  input: {
+    type: string;
+    provider: string;
+    model: string | null;
+    idempotencyKey: string;
+    params: unknown;
+    estimatedCostCents: number;
+  } & ({ projectId: string; characterId?: undefined } | { characterId: string; projectId?: undefined }),
+) {
   const inserted = await db
     .insert(generationJobs)
     .values({
-      projectId: input.projectId,
+      projectId: input.projectId ?? null,
+      characterId: input.characterId ?? null,
       type: input.type,
       provider: input.provider,
       model: input.model,
@@ -52,7 +54,8 @@ export async function requestJob(input: {
   } else {
     await db.insert(usageCosts).values({
       jobId: job.id,
-      projectId: input.projectId,
+      projectId: input.projectId ?? null,
+      characterId: input.characterId ?? null,
       provider: input.provider,
       estimatedCostCents: input.estimatedCostCents,
     });

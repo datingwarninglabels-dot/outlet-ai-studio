@@ -1,7 +1,16 @@
+export type ImageReference = {
+  /** Must be a URL the provider can fetch — a signed storage URL works. */
+  uri: string;
+  /** Referenced by this name in the prompt text, e.g. "the person tagged IDENTITY". */
+  tag: string;
+};
+
 export type ImageGenerationInput = {
   prompt: string;
   /** Runway ratio string, e.g. "720:1280" for vertical, "1280:720" for landscape. */
   ratio: string;
+  /** Up to 3 — used for character/identity consistency (Section 10). */
+  referenceImages?: ImageReference[];
 };
 
 export type ImageGenerationResult = {

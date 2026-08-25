@@ -1,4 +1,4 @@
-import { GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { DeleteObjectCommand, GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { getSignedUrl as presign } from "@aws-sdk/s3-request-presigner";
 import type { PutObjectInput, StorageProvider } from "./storage";
 
@@ -67,5 +67,13 @@ export class S3StorageProvider implements StorageProvider {
     }
 
     return Buffer.from(bytes);
+  }
+
+  async deleteObject(key: string): Promise<void> {
+    if (!this.isConfigured()) {
+      throw new Error("Object storage is not configured.");
+    }
+
+    await this.client().send(new DeleteObjectCommand({ Bucket: process.env.STORAGE_BUCKET!, Key: key }));
   }
 }

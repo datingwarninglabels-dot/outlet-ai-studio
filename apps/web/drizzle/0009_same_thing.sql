@@ -1,0 +1,2 @@
+ALTER TABLE "character_reference" ADD COLUMN "job_id" uuid;--> statement-breakpoint
+ALTER TABLE "character_reference" ADD CONSTRAINT "character_reference_job_id_generation_job_id_fk" FOREIGN KEY ("job_id") REFERENCES "public"."generation_job"("id") ON DELETE set null ON UPDATE no action;

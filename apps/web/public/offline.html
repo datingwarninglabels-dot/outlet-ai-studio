@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Offline — Outlet AI Studio</title>
+    <style>
+      html, body {
+        height: 100%;
+        margin: 0;
+        background: #0b0c10;
+        color: #f2f2f5;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
+      }
+      main {
+        min-height: 100%;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        text-align: center;
+        padding: 24px;
+        gap: 12px;
+      }
+      h1 {
+        font-size: 1.25rem;
+        font-weight: 600;
+        margin: 0;
+      }
+      p {
+        color: #9498a8;
+        max-width: 32rem;
+        margin: 0;
+        font-size: 0.9rem;
+      }
+      button {
+        margin-top: 12px;
+        height: 44px;
+        padding: 0 20px;
+        border-radius: 10px;
+        border: 1px solid #2a2d38;
+        background: transparent;
+        color: #f2f2f5;
+        font-size: 0.9rem;
+        cursor: pointer;
+      }
+      button:hover {
+        background: #14161c;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>You&apos;re offline</h1>
+      <p>
+        This page isn&apos;t available without a connection. Script and scene text you&apos;ve
+        already loaded may still be visible if you go back, but research, generation, and every
+        provider operation need internet to run.
+      </p>
+      <button onclick="location.reload()">Try again</button>
+    </main>
+  </body>
+</html>

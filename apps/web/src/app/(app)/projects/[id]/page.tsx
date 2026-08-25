@@ -49,6 +49,7 @@ import {
 import { GenerateAnimationForm } from "./animation-form";
 import { GenerateAssemblyForm } from "./assembly-form";
 import { JobConfirmCard, StalledJobCard } from "@/components/job-cards";
+import { JobNotifications } from "./job-notifications";
 import { ProjectOverridesForm } from "./project-overrides-form";
 import { ContinuityWarningsCard } from "./continuity-warnings";
 import { GenerateStoryboardForm, SceneEditForm } from "./scene-form";
@@ -716,6 +717,10 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
 
       <section className="flex flex-col gap-3">
         <h2 className="text-sm font-medium text-muted">Generation jobs</h2>
+        <JobNotifications
+          projectId={project.id}
+          initialJobs={jobs.map((job) => ({ id: job.id, type: job.type, status: job.status }))}
+        />
         <ul className="flex flex-col gap-2">
           {jobs.map((job) => (
             <li

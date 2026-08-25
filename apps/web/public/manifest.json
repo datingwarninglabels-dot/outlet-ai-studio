@@ -1,0 +1,15 @@
+{
+  "name": "Outlet AI Studio",
+  "short_name": "Outlet AI",
+  "description": "Your idea. Your voice. Your outlet. A private AI content-creation studio for faceless short-form and long-form video.",
+  "start_url": "/dashboard",
+  "display": "standalone",
+  "background_color": "#0b0c10",
+  "theme_color": "#0b0c10",
+  "orientation": "portrait-primary",
+  "icons": [
+    { "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

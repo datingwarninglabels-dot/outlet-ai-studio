@@ -1,8 +1,8 @@
 "use client";
 
-import { useActionState } from "react";
+import { useActionState, useState } from "react";
 import { PLATFORMS } from "@/lib/validation";
-import { generateScript } from "./actions";
+import { requestScript } from "./actions";
 
 const MODES = [
   { value: "quick", label: "Quick", description: "AI makes sensible choices with minimal questions." },
@@ -19,16 +19,24 @@ export function CreateVideoForm({
   scriptProviderConfigured: boolean;
   defaultPlatform: (typeof PLATFORMS)[number];
 }) {
-  const [state, formAction, pending] = useActionState(generateScript, initialState);
+  const [state, formAction, pending] = useActionState(requestScript, initialState);
+  const [idempotencyKey] = useState(() => crypto.randomUUID());
 
   return (
     <form action={formAction} className="flex max-w-xl flex-col gap-6">
+      <input type="hidden" name="idempotencyKey" value={idempotencyKey} />
+
       {!scriptProviderConfigured && (
         <p className="rounded-lg border border-dashed border-border p-4 text-sm text-muted">
           Script generation isn&apos;t connected yet — add <code>ANTHROPIC_API_KEY</code> to your
           environment and restart the app to enable this form.
         </p>
       )}
+
+      <p className="text-xs text-muted">
+        This creates the project and shows you an estimated cost before anything is generated —
+        nothing is charged until you confirm on the next screen.
+      </p>
 
       <div className="flex flex-col gap-1.5">
         <label htmlFor="idea" className="text-sm font-medium">
@@ -97,7 +105,7 @@ export function CreateVideoForm({
         disabled={pending || !scriptProviderConfigured}
         className="h-11 rounded-lg bg-gradient-to-r from-accent-purple via-accent-blue to-accent-teal font-medium text-black disabled:cursor-not-allowed disabled:opacity-60"
       >
-        {pending ? "Writing script..." : "Generate script"}
+        {pending ? "Setting up..." : "Continue"}
       </button>
     </form>
   );

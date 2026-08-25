@@ -4,11 +4,26 @@ import { eq } from "drizzle-orm";
 import { redirect } from "next/navigation";
 import { auth } from "@/auth";
 import { db } from "@/db";
-import { generationJobs, projects, scripts } from "@/db/schema";
+import { generationJobs, projects } from "@/db/schema";
+import { estimateGenerationCostCents } from "@/lib/cost-estimate";
+import { requestJob } from "@/lib/jobs";
 import { scriptProvider } from "@/lib/providers";
 import { createVideoSchema } from "@/lib/validation";
 
-export async function generateScript(
+const SCRIPT_MODEL = "claude-sonnet-5";
+const ASSUMED_OUTPUT_TOKENS = 700;
+
+/**
+ * Creates the project and a generation_job awaiting cost confirmation, then
+ * redirects to the project page where the Owner confirms or cancels before
+ * anything is actually generated. Guards against a double-submit creating a
+ * second project: if a job already exists for this idempotency key, reuse
+ * its project instead of making a new one. This is a best-effort guard (a
+ * SELECT-then-INSERT, not a DB constraint spanning both tables) — adequate
+ * for a single-Owner app's double-click/retry case, not built for real
+ * concurrent duplicate requests.
+ */
+export async function requestScript(
   _prev: { error: string },
   formData: FormData,
 ): Promise<{ error: string }> {
@@ -27,11 +42,26 @@ export async function generateScript(
     return { error: "Please enter an idea (3–2000 characters) and pick a platform and mode." };
   }
 
+  const idempotencyKey = String(formData.get("idempotencyKey") ?? "");
+  if (!idempotencyKey) {
+    return { error: "Missing request key — reload the page and try again." };
+  }
+
   if (!scriptProvider.isConfigured()) {
     return {
       error:
         "Script generation isn't connected yet — add ANTHROPIC_API_KEY to your environment and restart the app.",
     };
+  }
+
+  const [existingJob] = await db
+    .select()
+    .from(generationJobs)
+    .where(eq(generationJobs.idempotencyKey, idempotencyKey))
+    .limit(1);
+
+  if (existingJob) {
+    redirect(`/projects/${existingJob.projectId}`);
   }
 
   const [project] = await db
@@ -44,46 +74,21 @@ export async function generateScript(
     })
     .returning();
 
-  const [job] = await db
-    .insert(generationJobs)
-    .values({
-      projectId: project.id,
-      type: "script",
-      provider: scriptProvider.name,
-      status: "running",
-      params: parsed.data,
-    })
-    .returning();
+  const estimate = estimateGenerationCostCents({
+    model: SCRIPT_MODEL,
+    promptChars: parsed.data.idea.length + 500,
+    assumedOutputTokens: ASSUMED_OUTPUT_TOKENS,
+  });
 
-  try {
-    const result = await scriptProvider.generate(parsed.data);
-
-    await db.insert(scripts).values({
-      projectId: project.id,
-      content: result.content,
-      provider: result.provider,
-      model: result.model,
-      promptTokens: result.promptTokens,
-      completionTokens: result.completionTokens,
-      status: "draft",
-    });
-
-    await db
-      .update(generationJobs)
-      .set({ status: "succeeded", updatedAt: new Date() })
-      .where(eq(generationJobs.id, job.id));
-  } catch (err) {
-    await db
-      .update(generationJobs)
-      .set({
-        status: "failed",
-        error: err instanceof Error ? err.message : String(err),
-        updatedAt: new Date(),
-      })
-      .where(eq(generationJobs.id, job.id));
-
-    return { error: "Script generation failed. Open the project to see the job error." };
-  }
+  await requestJob({
+    projectId: project.id,
+    type: "script",
+    provider: scriptProvider.name,
+    model: SCRIPT_MODEL,
+    idempotencyKey,
+    params: parsed.data,
+    estimatedCostCents: estimate.cents,
+  });
 
   redirect(`/projects/${project.id}`);
 }

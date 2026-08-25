@@ -1,9 +1,23 @@
-import { and, desc, eq } from "drizzle-orm";
+import { asc, desc, eq } from "drizzle-orm";
 import { notFound } from "next/navigation";
 import { auth } from "@/auth";
 import { db } from "@/db";
-import { generationJobs, projects, scenes, scripts } from "@/db/schema";
+import { generationJobs, scenes, scripts, usageCosts } from "@/db/schema";
+import { isStalled } from "@/lib/jobs";
 import { storyboardProvider } from "@/lib/providers";
+import { loadOwnedProject } from "@/lib/authz";
+import {
+  cancelScript,
+  cancelStoryboard,
+  confirmScript,
+  confirmStoryboard,
+  moveScene,
+  requestStoryboard,
+  retryScript,
+  retryStoryboard,
+  updateScene,
+} from "./actions";
+import { JobConfirmCard, StalledJobCard } from "./job-cards";
 import { GenerateStoryboardForm, SceneEditForm } from "./scene-form";
 
 export default async function ProjectDetailPage({ params }: { params: Promise<{ id: string }> }) {
@@ -13,13 +27,10 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
     notFound();
   }
 
-  const [project] = await db
-    .select()
-    .from(projects)
-    .where(and(eq(projects.id, id), eq(projects.ownerId, session.user.id)))
-    .limit(1);
-
-  if (!project) {
+  let project;
+  try {
+    project = await loadOwnedProject(id, session.user.id);
+  } catch {
     notFound();
   }
 
@@ -30,18 +41,27 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
     .orderBy(desc(scripts.createdAt))
     .limit(1);
 
-  const [scene] = await db
+  const projectScenes = await db
     .select()
     .from(scenes)
     .where(eq(scenes.projectId, project.id))
-    .orderBy(desc(scenes.createdAt))
-    .limit(1);
+    .orderBy(asc(scenes.order));
 
   const jobs = await db
     .select()
     .from(generationJobs)
     .where(eq(generationJobs.projectId, project.id))
     .orderBy(desc(generationJobs.createdAt));
+
+  const scriptJob = jobs.find((job) => job.type === "script");
+  const storyboardJob = jobs.find((job) => job.type === "storyboard");
+
+  const [scriptCost] = scriptJob
+    ? await db.select().from(usageCosts).where(eq(usageCosts.jobId, scriptJob.id)).limit(1)
+    : [];
+  const [storyboardCost] = storyboardJob
+    ? await db.select().from(usageCosts).where(eq(usageCosts.jobId, storyboardJob.id)).limit(1)
+    : [];
 
   return (
     <div className="flex max-w-2xl flex-col gap-8">
@@ -54,6 +74,31 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
 
       <section className="flex flex-col gap-3">
         <h2 className="text-sm font-medium text-muted">Script</h2>
+        {scriptJob?.status === "awaiting_confirmation" && scriptCost && (
+          <JobConfirmCard
+            jobId={scriptJob.id}
+            estimatedCostCents={scriptCost.estimatedCostCents}
+            provider={scriptJob.provider}
+            model={scriptJob.model}
+            label="script generation"
+            confirmAction={confirmScript}
+            cancelAction={cancelScript}
+          />
+        )}
+        {scriptJob?.status === "running" && isStalled(scriptJob) && (
+          <StalledJobCard jobId={scriptJob.id} label="Script generation" retryAction={retryScript} />
+        )}
+        {scriptJob?.status === "failed" && (
+          <p className="rounded-lg border border-dashed border-red-400/40 p-6 text-sm text-red-400">
+            Script generation failed: {scriptJob.error}. Start a new project from Create Video to try
+            again.
+          </p>
+        )}
+        {scriptJob?.status === "cancelled" && (
+          <p className="rounded-lg border border-dashed border-border p-6 text-sm text-muted">
+            Script generation was cancelled before it started — no cost was incurred.
+          </p>
+        )}
         {script ? (
           <div className="rounded-lg border border-border bg-surface p-4">
             <p className="whitespace-pre-wrap text-sm">{script.content}</p>
@@ -63,44 +108,92 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
             </p>
           </div>
         ) : (
-          <p className="rounded-lg border border-dashed border-border p-6 text-sm text-muted">
-            No script generated yet.
-          </p>
+          !scriptJob && (
+            <p className="rounded-lg border border-dashed border-border p-6 text-sm text-muted">
+              No script generated yet.
+            </p>
+          )
         )}
       </section>
 
       <section className="flex flex-col gap-3">
         <h2 className="text-sm font-medium text-muted">Storyboard</h2>
-        {scene ? (
-          <SceneEditForm
-            projectId={project.id}
-            scene={{
-              id: scene.id,
-              narration: scene.narration,
-              visualDescription: scene.visualDescription,
-              durationSeconds: scene.durationSeconds,
-              provider: scene.provider,
-              model: scene.model,
-            }}
+
+        {storyboardJob?.status === "awaiting_confirmation" && storyboardCost && (
+          <JobConfirmCard
+            jobId={storyboardJob.id}
+            estimatedCostCents={storyboardCost.estimatedCostCents}
+            provider={storyboardJob.provider}
+            model={storyboardJob.model}
+            label="storyboard generation"
+            confirmAction={confirmStoryboard}
+            cancelAction={cancelStoryboard}
           />
-        ) : (
-          <div className="flex flex-col gap-3 rounded-lg border border-dashed border-border p-6">
-            <p className="text-sm text-muted">
-              No storyboard yet. This turns the script into a single scene — narration, a visual
-              description, and an estimated duration — that you can edit before voice or visuals are
-              generated from it.
+        )}
+        {storyboardJob?.status === "running" && isStalled(storyboardJob) && (
+          <StalledJobCard
+            jobId={storyboardJob.id}
+            label="Storyboard generation"
+            retryAction={retryStoryboard}
+          />
+        )}
+        {storyboardJob?.status === "failed" && (
+          <p className="rounded-lg border border-dashed border-red-400/40 p-6 text-sm text-red-400">
+            Storyboard generation failed: {storyboardJob.error}
+          </p>
+        )}
+
+        {projectScenes.length > 0 ? (
+          <div className="flex flex-col gap-3">
+            {projectScenes.map((scene, index) => (
+              <SceneEditForm
+                key={scene.id}
+                projectId={project.id}
+                scene={{
+                  id: scene.id,
+                  narration: scene.narration,
+                  visualDescription: scene.visualDescription,
+                  audioDirection: scene.audioDirection ?? "",
+                  durationSeconds: scene.durationSeconds,
+                  provider: scene.provider,
+                  model: scene.model,
+                  version: scene.version,
+                }}
+                index={index}
+                sceneCount={projectScenes.length}
+                updateAction={updateScene}
+                moveAction={moveScene}
+              />
+            ))}
+            <p className="text-xs text-muted">
+              Total estimated runtime:{" "}
+              {projectScenes.reduce((sum, s) => sum + (s.durationSeconds ?? 0), 0)}s across{" "}
+              {projectScenes.length} scene{projectScenes.length === 1 ? "" : "s"}.
             </p>
-            <GenerateStoryboardForm
-              projectId={project.id}
-              disabledReason={
-                !script
-                  ? "Generate a script first — the storyboard is built from it."
-                  : !storyboardProvider.isConfigured()
-                    ? "Storyboard generation isn't connected yet — add ANTHROPIC_API_KEY to your environment and restart the app."
-                    : null
-              }
-            />
           </div>
+        ) : (
+          (!storyboardJob ||
+            storyboardJob.status === "failed" ||
+            storyboardJob.status === "cancelled") && (
+            <div className="flex flex-col gap-3 rounded-lg border border-dashed border-border p-6">
+              <p className="text-sm text-muted">
+                {storyboardJob
+                  ? "Try again — this creates a new generation request."
+                  : "No storyboard yet. This breaks the script into a scene list — narration, a visual description, audio direction, and an estimated duration per scene — that you can edit and reorder before voice or visuals are generated from it."}
+              </p>
+              <GenerateStoryboardForm
+                projectId={project.id}
+                disabledReason={
+                  !script
+                    ? "Generate a script first — the storyboard is built from it."
+                    : !storyboardProvider.isConfigured()
+                      ? "Storyboard generation isn't connected yet — add ANTHROPIC_API_KEY to your environment and restart the app."
+                      : null
+                }
+                requestAction={requestStoryboard}
+              />
+            </div>
+          )
         )}
       </section>
 
@@ -130,9 +223,7 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
           ))}
         </ul>
         {jobs.some((job) => job.status === "failed" && job.error) && (
-          <p className="text-xs text-red-400">
-            {jobs.find((job) => job.status === "failed")?.error}
-          </p>
+          <p className="text-xs text-red-400">{jobs.find((job) => job.status === "failed")?.error}</p>
         )}
       </section>
 

@@ -6,6 +6,7 @@ export type StoryboardGenerationInput = {
 export type StoryboardScene = {
   narration: string;
   visualDescription: string;
+  audioDirection: string;
   durationSeconds: number;
 };
 

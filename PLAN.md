@@ -46,26 +46,52 @@ using it is just risk with no benefit.
   public sign-up), Postgres schema, private-storage-ready structure, static
   11-section dashboard shell with honest empty/placeholder states. No AI
   calls.
-- **M1 — Vertical slice** *(in progress)*: idea → script → 1-scene storyboard
-  → 1 TTS voice → 1 AI image/video scene → assembled export → downloadable
-  package. **Idea → script leg is done**: Create Video has a real form
-  (idea/platform/mode), a `ScriptProvider` adapter interface with an
-  `AnthropicScriptProvider` implementation (Section 18-style — swapping
-  script providers later won't touch this form or the server action), and
-  `script`/`generation_job` tables track output and status. Gated honestly —
-  if `ANTHROPIC_API_KEY` isn't set, the form says so and disables submit
-  rather than faking success. **Script → 1-scene storyboard leg is done**:
-  the project detail page can turn the generated script into a single scene
-  (narration, a visual-generation-ready description, an estimated duration)
-  via a `StoryboardProvider`/`AnthropicStoryboardProvider` adapter mirroring
-  the script provider's shape, backed by a new `scene` table (with an
-  `order` column so M2's multi-scene breakdown doesn't need a schema
-  rework). The scene is manually editable and re-saveable before anything
-  downstream uses it, and generation is gated the same honest way as script
-  generation. Not yet built: TTS, image/video generation, export, and the
-  worker + job queue (still fine to run generation directly in the request
-  for now — only needed once a step takes long enough to want to survive a
-  browser close).
+- **M1 — Vertical slice** *(in progress)*: idea → script → scene breakdown →
+  1 TTS voice → 1 AI image/video scene → assembled export → downloadable
+  package. **Idea → script** and **script → scene breakdown** legs are done,
+  both via adapter interfaces (`ScriptProvider`/`AnthropicScriptProvider`,
+  `StoryboardProvider`/`AnthropicStoryboardProvider`, Section 18-style —
+  swapping providers later won't touch product code). Not yet built: TTS,
+  image/video generation, export.
+- **M1.5 — Job resilience, cost gate, scene breakdown** *(done)*: closed two
+  structural gaps from M1 before more (and more expensive) generation types
+  build on top of them.
+  - **Cost confirmation gate**: no generation call fires until the Owner
+    sees an estimated cost and explicitly confirms, via a generic
+    request → confirm/cancel flow (`JobConfirmCard`) that both script and
+    storyboard generation now go through — image/video/TTS plug into the
+    same gate later without rework. Estimates come from a hardcoded,
+    clearly-approximate per-model price table (`cost-estimate.ts`) — no live
+    pricing API exists.
+  - **Job resilience**: `generation_jobs` gained an idempotency key (a
+    double-submit resolves to the same job, never a second one),
+    `last_heartbeat_at` for stall detection, and a new `job_steps` table for
+    step-by-step status. A job stuck `running` past 5 minutes shows as
+    stalled with a Retry action that resumes the *same* job — true mid-call
+    resumption isn't a coherent concept for a single LLM call, so "resumable"
+    here means "detected and safely retryable," not "continues where it left
+    off." Transient provider failures (5xx/429/network) get one retry with
+    backoff (`withRetry`); failure messages shown to the Owner are sanitized
+    (`publicErrorMessage`), never raw provider/SDK text.
+  - **Cost tracking**: moved off `generation_jobs` into a dedicated
+    `usage_costs` table (estimate, confirmation timestamp, actual cost when
+    known) — keeps job orchestration and spend tracking separate, and sets
+    up Provider Hub's (M6) per-provider/per-project spend queries without
+    another migration later.
+  - **Scene breakdown, generalized**: storyboard generation now produces a
+    real scene list (2-8 scenes, not a hardcoded single scene), each with
+    narration, visual description, **audio direction**, and duration.
+    Manually editable and reorderable (up/down, no drag library added yet)
+    before anything downstream uses them; edits bump a `version` counter.
+    Added an optional `chapters` table for future long-form grouping — schema
+    only, not wired into any UI yet, a deliberate extension point.
+  - Deliberately **not** done: a real background worker/queue (Redis/BullMQ)
+    — execution stays in-process, driven by explicit Owner actions
+    (confirm/retry), since every step here is a single-digit-second LLM
+    call. Revisit when video generation genuinely needs multi-minute
+    out-of-process execution. Also not done: chapter-grouping UI, and
+    per-scene visual/voice generation (both explicitly out of scope for this
+    slice).
 - **M2**: Multi-scene projects, simple editor, captions, cost-estimate-then-
   confirm flow before any paid generation.
 - **M3**: Character Library + consistency test workflow.

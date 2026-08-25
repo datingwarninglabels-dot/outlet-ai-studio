@@ -36,11 +36,22 @@ export default async function MediaLibraryPage({
 
   await sweepExpiredTrash();
 
-  const [ownedProjects, assets, trashed, usage] = await Promise.all([
-    db.select({ id: projects.id, title: projects.title }).from(projects).where(eq(projects.ownerId, session.user.id)),
-    listMediaAssets({ projectId: projectFilter, category: categoryFilter }),
-    listTrashedMediaAssets(),
-    getStorageUsage(),
+  const ownedProjects = await db
+    .select({ id: projects.id, title: projects.title })
+    .from(projects)
+    .where(eq(projects.ownerId, session.user.id));
+
+  // A tampered/stale ?project= query param (the dropdown only ever submits
+  // the Owner's own project ids) shouldn't crash the page — fall back to
+  // the unfiltered list rather than letting the ownership check's throw
+  // bubble up through this Server Component render.
+  const validatedProjectFilter =
+    projectFilter && ownedProjects.some((p) => p.id === projectFilter) ? projectFilter : undefined;
+
+  const [assets, trashed, usage] = await Promise.all([
+    listMediaAssets(session.user.id, { projectId: validatedProjectFilter, category: categoryFilter }),
+    listTrashedMediaAssets(session.user.id),
+    getStorageUsage(session.user.id),
   ]);
 
   const assetCards = await Promise.all(

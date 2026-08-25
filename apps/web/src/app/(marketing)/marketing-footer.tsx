@@ -1,3 +1,4 @@
+import { Logo } from "./logo";
 import { PRIMARY_CTA_LABEL, primaryCtaHref, SOCIAL_LINKS, SUPPORT_EMAIL, currentYear } from "@/lib/site-config";
 
 const PRODUCT_LINKS = [
@@ -22,7 +23,7 @@ export function MarketingFooter() {
       <div className="mx-auto flex max-w-6xl flex-col gap-10 px-4 py-12 sm:px-6">
         <div className="grid grid-cols-2 gap-8 sm:grid-cols-4">
           <div className="col-span-2 flex flex-col gap-3 sm:col-span-1">
-            <p className="text-sm font-semibold">Outlet AI Studio</p>
+            <Logo className="text-sm font-semibold" />
             <p className="text-sm text-muted">Your idea. Your voice. Your outlet.</p>
             <a
               href={primaryCtaHref()}

@@ -1,4 +1,4 @@
-import { asc, desc, eq } from "drizzle-orm";
+import { and, asc, desc, eq } from "drizzle-orm";
 import { notFound } from "next/navigation";
 import { auth } from "@/auth";
 import { db } from "@/db";
@@ -91,14 +91,16 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
     : [];
   const voicePlaybackUrl = voiceAsset ? await getVoicePlaybackUrl(voiceAsset.id) : null;
 
-  const [visualAsset] = visualJob
-    ? await db
-        .select()
-        .from(mediaAssets)
-        .where(eq(mediaAssets.jobId, visualJob.id))
-        .limit(1)
-    : [];
-  const visualUrl = visualAsset ? await getVisualUrl(visualAsset.id) : null;
+  const visualAssets = await db
+    .select()
+    .from(mediaAssets)
+    .where(and(eq(mediaAssets.projectId, project.id), eq(mediaAssets.type, "scene_image")));
+  const visualsBySceneId = new Map(
+    await Promise.all(
+      visualAssets.map(async (asset) => [asset.sceneId, { asset, url: await getVisualUrl(asset.id) }] as const),
+    ),
+  );
+  const scenesRemaining = projectScenes.filter((s) => !visualsBySceneId.has(s.id)).length;
 
   return (
     <div className="flex max-w-2xl flex-col gap-8">
@@ -312,25 +314,39 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
           </p>
         )}
 
-        {visualUrl ? (
-          <div className="rounded-lg border border-border bg-surface p-4">
-            {/* eslint-disable-next-line @next/next/no-img-element -- signed private-storage URL, not an optimizable static asset */}
-            <img src={visualUrl} alt="Generated visual for scene 1" className="w-full rounded-lg" />
-            <p className="mt-2 text-xs text-muted">{visualAsset?.provider}</p>
+        {visualAssets.length > 0 && (
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+            {projectScenes.map((scene, index) => {
+              const visual = visualsBySceneId.get(scene.id);
+              if (!visual) return null;
+              return (
+                <div key={scene.id} className="rounded-lg border border-border bg-surface p-2">
+                  {/* eslint-disable-next-line @next/next/no-img-element -- signed private-storage URL, not an optimizable static asset */}
+                  <img
+                    src={visual.url}
+                    alt={`Generated visual for scene ${index + 1}`}
+                    className="w-full rounded"
+                  />
+                  <p className="mt-1 text-xs text-muted">Scene {index + 1}</p>
+                </div>
+              );
+            })}
           </div>
-        ) : (
+        )}
+
+        {scenesRemaining > 0 &&
           (!visualJob || visualJob.status === "failed" || visualJob.status === "cancelled") && (
             <div className="flex flex-col gap-3 rounded-lg border border-dashed border-border p-6">
               <p className="text-sm text-muted">
-                {visualJob
-                  ? "Try again — this creates a new generation request."
-                  : "No visual yet. M1 generates a still image for scene 1 only — per-scene visuals for the rest of the list, and animating this into video, come later."}
+                {visualAssets.length > 0
+                  ? `${scenesRemaining} scene${scenesRemaining === 1 ? "" : "s"} still need${scenesRemaining === 1 ? "s" : ""} a visual.`
+                  : "No visuals yet. Generates a still image per scene — animating these into video comes later."}
               </p>
               <GenerateVisualForm
                 projectId={project.id}
                 disabledReason={
                   projectScenes.length === 0
-                    ? "Generate a storyboard first — the visual is built from scene 1's description."
+                    ? "Generate a storyboard first — visuals are built from the scene list."
                     : !imageProvider.isConfigured()
                       ? "Visual generation isn't connected yet — add RUNWAYML_API_SECRET to your environment and restart the app."
                       : !storageProvider.isConfigured()
@@ -339,8 +355,7 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
                 }
               />
             </div>
-          )
-        )}
+          )}
       </section>
 
       <section className="flex flex-col gap-3">
@@ -397,7 +412,7 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
 
       <p className="text-xs text-muted">
         Export packages what&apos;s generated so far — it doesn&apos;t assemble a final video.
-        Multi-scene visuals, animation, captions, and thumbnails aren&apos;t wired up yet.
+        Animating visuals into video, captions, and thumbnails aren&apos;t wired up yet.
       </p>
     </div>
   );

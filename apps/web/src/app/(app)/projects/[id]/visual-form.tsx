@@ -30,7 +30,7 @@ export function GenerateVisualForm({
         disabled={pending || Boolean(disabledReason)}
         className="h-11 w-fit rounded-lg bg-gradient-to-r from-accent-purple via-accent-blue to-accent-teal px-4 font-medium text-black disabled:cursor-not-allowed disabled:opacity-60"
       >
-        {pending ? "Estimating cost..." : "Generate visual for scene 1"}
+        {pending ? "Estimating cost..." : "Generate visuals"}
       </button>
     </form>
   );

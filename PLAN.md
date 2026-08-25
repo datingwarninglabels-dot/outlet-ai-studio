@@ -57,19 +57,24 @@ using it is just risk with no benefit.
   - **Voice**: combines every scene's narration into one track
     (Voice Studio's multi-speaker/per-character assignment is Section 13
     scope, not this slice).
-  - **Visual**: generates one still image (Runway `gen4_image`,
-    text-to-image) for scene 1 only — per-scene visuals for the rest of the
-    list, and animating this into video via Runway's image-to-video
-    endpoint, are both deferred. Runway's request/response shapes here were
-    verified against their published docs (base URL, auth/version headers,
-    endpoint bodies, task-polling status values, and `gen4_image` credit
-    pricing) rather than assumed from memory, unlike the cost-estimate
-    tables elsewhere which are still best-effort approximations. Generation
-    is async (submit → poll → download) and can take up to ~2 minutes,
-    handled by polling inside the provider call rather than a separate UI
-    step — still fine to run in-process for now (a single slow request, not
-    yet the multi-minute-job case that would justify standing up a real
-    worker), but this is the leg most likely to outgrow that first.
+  - **Visual**: generates one still image per scene (Runway `gen4_image`,
+    text-to-image) — animating these into video via Runway's image-to-video
+    endpoint is deferred. One job per generation batch, one `job_step` per
+    scene, resumable at scene granularity: a request only targets scenes
+    that don't already have a visual, and if a batch fails partway through,
+    retry skips the scenes already generated (checked via existing
+    `media_asset` rows for that job) rather than re-generating or
+    re-charging for them — the clearest real exercise yet of the M1.5 job
+    resilience model. Runway's request/response shapes here were verified
+    against their published docs (base URL, auth/version headers, endpoint
+    bodies, task-polling status values, and `gen4_image` credit pricing)
+    rather than assumed from memory, unlike the cost-estimate tables
+    elsewhere which are still best-effort approximations. Each scene's
+    generation is async (submit → poll → download) and can take up to ~2
+    minutes, handled by polling inside the provider call rather than a
+    separate UI step — still fine to run in-process for a few scenes, but
+    this is the leg most likely to eventually want a real worker if scene
+    counts grow.
   - Both require private object storage configured first — generated media
     is copied into R2/S3 via a `StorageProvider`/`S3StorageProvider` adapter
     and only ever served back through short-lived signed URLs, never a

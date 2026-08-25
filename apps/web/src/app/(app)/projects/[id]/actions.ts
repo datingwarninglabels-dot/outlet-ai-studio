@@ -481,15 +481,25 @@ export async function requestVisual(_prev: ActionState, formData: FormData): Pro
     };
   }
 
-  const [firstScene] = await db
+  const projectScenes = await db
     .select()
     .from(scenes)
     .where(eq(scenes.projectId, project.id))
-    .orderBy(asc(scenes.order))
-    .limit(1);
+    .orderBy(asc(scenes.order));
 
-  if (!firstScene) {
-    return { error: "Generate a storyboard first — the visual is built from scene 1's description." };
+  if (projectScenes.length === 0) {
+    return { error: "Generate a storyboard first — visuals are built from the scene list." };
+  }
+
+  const doneAssets = await db
+    .select({ sceneId: mediaAssets.sceneId })
+    .from(mediaAssets)
+    .where(and(eq(mediaAssets.projectId, project.id), eq(mediaAssets.type, "scene_image")));
+  const doneSceneIds = new Set(doneAssets.map((a) => a.sceneId));
+
+  const scenesNeeded = projectScenes.filter((s) => !doneSceneIds.has(s.id));
+  if (scenesNeeded.length === 0) {
+    return { error: "Every scene already has a visual." };
   }
 
   await requestJob({
@@ -499,55 +509,84 @@ export async function requestVisual(_prev: ActionState, formData: FormData): Pro
     model: null,
     idempotencyKey,
     params: {
-      sceneId: firstScene.id,
-      prompt: firstScene.visualDescription,
+      sceneIds: scenesNeeded.map((s) => s.id),
       ratio: ratioForPlatform(project.platform ?? "Custom Project"),
     },
-    estimatedCostCents: estimateImageCostCents(imageProvider.name),
+    estimatedCostCents: scenesNeeded.length * estimateImageCostCents(imageProvider.name),
   });
 
   revalidatePath(`/projects/${project.id}`);
   return { error: "" };
 }
 
+/**
+ * Generates one image per scene in job.params.sceneIds, as separate
+ * job_steps. Resumable at scene granularity: a retry re-checks which scenes
+ * already have a media_asset from THIS job and skips them, so a failure
+ * partway through a batch doesn't lose completed scenes or re-charge for
+ * them.
+ */
 async function executeVisualJob(job: typeof generationJobs.$inferSelect): Promise<string | null> {
-  const stepId = await startStep(job.id, "generate_visual", 0);
+  const params = job.params as { sceneIds: string[]; ratio: string };
 
-  try {
-    const params = job.params as { sceneId: string; prompt: string; ratio: string };
-    const result = await withRetry(() =>
-      imageProvider.generate({ prompt: params.prompt, ratio: params.ratio }),
-    );
+  const doneAssets = await db
+    .select({ sceneId: mediaAssets.sceneId })
+    .from(mediaAssets)
+    .where(and(eq(mediaAssets.jobId, job.id), eq(mediaAssets.type, "scene_image")));
+  const doneSceneIds = new Set(doneAssets.map((a) => a.sceneId));
 
-    const extension = result.contentType.includes("png") ? "png" : "jpg";
-    const storageKey = `projects/${job.projectId}/scenes/${params.sceneId}/visual-${job.id}.${extension}`;
-    const uploaded = await storageProvider.putObject({
-      key: storageKey,
-      body: result.image,
-      contentType: result.contentType,
-    });
+  for (let i = 0; i < params.sceneIds.length; i++) {
+    const sceneId = params.sceneIds[i];
+    if (doneSceneIds.has(sceneId)) {
+      continue;
+    }
 
-    await db.insert(mediaAssets).values({
-      projectId: job.projectId,
-      jobId: job.id,
-      sceneId: params.sceneId,
-      type: "scene_image",
-      storageKey: uploaded.key,
-      contentType: result.contentType,
-      sizeBytes: uploaded.sizeBytes,
-      provider: result.provider,
-      model: result.model,
-    });
+    const stepId = await startStep(job.id, `generate_visual_scene_${i}`, i);
 
-    await completeStep(stepId, { sizeBytes: uploaded.sizeBytes });
-    await completeJob(job.id);
-    return null;
-  } catch (err) {
-    const publicMsg = publicErrorMessage(err);
-    await failStep(stepId, publicMsg);
-    await failJob(job.id, publicMsg, err instanceof Error ? (err.stack ?? err.message) : String(err));
-    return publicMsg;
+    const [scene] = await db.select().from(scenes).where(eq(scenes.id, sceneId)).limit(1);
+    if (!scene) {
+      const msg = "A scene was deleted before its visual could be generated.";
+      await failStep(stepId, msg);
+      await failJob(job.id, msg, msg);
+      return msg;
+    }
+
+    try {
+      const result = await withRetry(() =>
+        imageProvider.generate({ prompt: scene.visualDescription, ratio: params.ratio }),
+      );
+
+      const extension = result.contentType.includes("png") ? "png" : "jpg";
+      const storageKey = `projects/${job.projectId}/scenes/${sceneId}/visual-${job.id}.${extension}`;
+      const uploaded = await storageProvider.putObject({
+        key: storageKey,
+        body: result.image,
+        contentType: result.contentType,
+      });
+
+      await db.insert(mediaAssets).values({
+        projectId: job.projectId,
+        jobId: job.id,
+        sceneId,
+        type: "scene_image",
+        storageKey: uploaded.key,
+        contentType: result.contentType,
+        sizeBytes: uploaded.sizeBytes,
+        provider: result.provider,
+        model: result.model,
+      });
+
+      await completeStep(stepId, { sizeBytes: uploaded.sizeBytes });
+    } catch (err) {
+      const publicMsg = publicErrorMessage(err);
+      await failStep(stepId, publicMsg);
+      await failJob(job.id, publicMsg, err instanceof Error ? (err.stack ?? err.message) : String(err));
+      return publicMsg;
+    }
   }
+
+  await completeJob(job.id);
+  return null;
 }
 
 export async function confirmVisual(_prev: ActionState, formData: FormData): Promise<ActionState> {

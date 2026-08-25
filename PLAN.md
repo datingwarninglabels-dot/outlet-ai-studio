@@ -342,14 +342,39 @@ using it is just risk with no benefit.
   (prompt text, an existing provider parameter). Verified: `npm run build`
   (zero TS errors) and `npm run lint`, both clean; migration additive.
   Not live-tested — same sandbox limitation as the rest of this project.
+- **Media Library** *(done — closes the gap flagged above)*: a single
+  browser over every `media_asset` in the app — generated (scene images/
+  video, voice tracks, thumbnails, character/world references, brand kit
+  assets, final videos) and directly uploaded — filterable by project and
+  category. No `ownerId` column needed: single-Owner, bootstrap-locked app,
+  so every authenticated request already is the Owner. Direct upload now
+  covers the file types Section 17 lists that the app couldn't ingest at
+  all before: photos, art, videos, logos, music, sound effects, voice
+  recordings, scripts (.txt/.md), subtitle files (.srt/.vtt) — a new
+  `library_upload` media type, category in `metadata`. Preview per type
+  (image/video/audio inline), rename, tag, download, and "reuse" (reassign
+  a standalone upload's project). Trash with a 30-day recovery window,
+  enforced lazily on page load (`sweepExpiredTrash()`) since this app has
+  no background job/cron. Storage usage: total + per-project breakdown.
+  **Caught before shipping**: "reuse" (reassigning `projectId`) and Trash
+  are only safe on standalone uploads — a scene's image, a thumbnail, a
+  character reference, etc. are looked up directly by their own pages via
+  `mediaAssets`, and none of those lookups check `deletedAt` or expect
+  `projectId` to change out from under a `jobId`/`sceneId` they still
+  reference. Restricted both actions (server-side guard + hidden in the
+  UI) to `type === "library_upload"`; generated media is
+  browsable/downloadable here but managed from its own page. Deliberately
+  out of scope: real malware/virus scanning (type/size checks only, same
+  as every other upload path in this app), compression/transcoding (no
+  ffmpeg in this app's architecture, same reasoning as the Assembly
+  provider choice), plan-based storage limits (no billing/plan system
+  exists yet to attach them to). Verified: `npm run build` (TypeScript
+  strict, zero errors) and `npm run lint`, both clean — build initially
+  failed on a Next.js "use server" export rule (a plain constant can't be
+  exported from a server-actions file), fixed by moving it to
+  `lib/media-categories.ts`. Migration additive. Not live-tested.
 - **M6**: PWA polish, accessibility pass, full test suite (Section 23 of the
   master prompt), security review.
-- **Not yet scheduled**: a general Media Library (Section 17 — upload/
-  preview/rename/tag/reuse/download/delete across all media types, storage
-  usage, Trash with a recovery window). The nav item exists (`/media-library`,
-  still `planned`) but no milestone above claims it; M5 only covered the
-  Brand Kit half of Section 17. Worth an explicit decision on where this
-  lands before M6, rather than assuming it's implicitly covered.
 
 ## Credentials needed (not all at once — per milestone)
 

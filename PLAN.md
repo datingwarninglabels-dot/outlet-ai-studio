@@ -81,12 +81,19 @@ using it is just risk with no benefit.
     temporary provider link, per Section 19. New `media_asset` table tracks
     both.
   - **Export**: a free (no new provider cost, so no cost-gate) `.zip`
-    download — script, scene list, voice track, visual — via
-    `/api/projects/[id]/export`. Explicitly **not** an assembled final
+    download — script, scene list, SRT/VTT captions, voice track, visuals —
+    via `/api/projects/[id]/export`. Explicitly **not** an assembled final
     video; that needs real video compositing (ffmpeg or equivalent), which
     is a large enough, risky enough addition (server runtime/binary
     concerns, especially for a serverless deploy target) that it's worth
-    its own milestone rather than folding in here unverified.
+    its own milestone rather than folding in here unverified. Captions
+    (`captions.ts`) are one cue per scene, timed from each scene's estimated
+    duration — no word-level sync, since there's no speech alignment
+    against the actual generated audio. Pure computation, no provider
+    involved, so this is the one piece of the whole app actually verified
+    working end to end in this environment (ran it directly against sample
+    scene data — cumulative timestamps and SRT/VTT formatting both correct)
+    rather than only typechecked/built.
 - **M1.5 — Job resilience, cost gate, scene breakdown** *(done)*: closed two
   structural gaps from M1 before more (and more expensive) generation types
   build on top of them.

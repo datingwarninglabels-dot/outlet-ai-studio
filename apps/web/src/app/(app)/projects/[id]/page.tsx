@@ -363,8 +363,8 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
         {script || projectScenes.length > 0 ? (
           <div className="flex flex-col gap-2 rounded-lg border border-border bg-surface p-4">
             <p className="text-sm text-muted">
-              A .zip with everything generated so far — script, scene list, voice track, and visual.
-              Not an assembled final video yet.
+              A .zip with everything generated so far — script, scene list, SRT/VTT captions, voice
+              track, and visuals. Not an assembled final video yet.
             </p>
             <a
               href={`/api/projects/${project.id}/export`}

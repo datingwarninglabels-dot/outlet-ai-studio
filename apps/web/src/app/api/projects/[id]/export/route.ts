@@ -5,6 +5,7 @@ import { auth } from "@/auth";
 import { db } from "@/db";
 import { mediaAssets, scenes, scripts } from "@/db/schema";
 import { loadOwnedProject } from "@/lib/authz";
+import { buildSrt, buildVtt } from "@/lib/captions";
 import { storageProvider } from "@/lib/storage-instance";
 
 // This is a free operation — it only packages assets already generated
@@ -55,6 +56,10 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
       "This package contains everything generated for this project so far.",
       "It does NOT include an assembled final video — compositing the visual,",
       "voice track, and captions into one video file isn't built yet.",
+      "",
+      "captions.srt/.vtt: one caption per scene, timed from each scene's",
+      "estimated duration — not word-level synced, since there's no speech",
+      "alignment against the actual generated audio yet.",
     ].join("\n"),
   );
 
@@ -81,6 +86,9 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
         ),
       ].join("\n---\n\n"),
     );
+
+    zip.file("captions.srt", buildSrt(projectScenes));
+    zip.file("captions.vtt", buildVtt(projectScenes));
   }
 
   for (const asset of assets) {

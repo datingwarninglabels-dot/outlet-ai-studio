@@ -6,11 +6,13 @@ import { revalidatePath } from "next/cache";
 import { auth } from "@/auth";
 import { db } from "@/db";
 import {
+  brandKits,
   characterReferences,
   characters,
   continuityChecks,
   generationJobs,
   mediaAssets,
+  projects,
   scenes,
   scripts,
   worldReferences,
@@ -54,7 +56,7 @@ import {
 } from "@/lib/providers";
 import type { AssemblyCaption, AssemblyClip } from "@/lib/providers";
 import { storageProvider } from "@/lib/storage-instance";
-import { sceneUpdateSchema } from "@/lib/validation";
+import { projectOverridesSchema, sceneUpdateSchema } from "@/lib/validation";
 import { worldSettingSummary } from "@/lib/world-prompt";
 
 const STORYBOARD_MODEL = "claude-sonnet-5";
@@ -396,13 +398,20 @@ export async function requestVoice(_prev: ActionState, formData: FormData): Prom
 
   const narration = projectScenes.map((s) => s.narration).join("\n\n");
 
+  // Section 17: a project's voiceIdOverride wins; otherwise fall back to
+  // the Owner's Brand Kit default voice, if set. Resolved once here (at
+  // request time) rather than at execute time, same as every other job's
+  // params — what actually runs is locked in at confirmation.
+  const [brandKit] = await db.select().from(brandKits).where(eq(brandKits.ownerId, session.user.id)).limit(1);
+  const effectiveVoiceId = project.voiceIdOverride ?? brandKit?.defaultVoiceId ?? undefined;
+
   await requestJob({
     projectId: project.id,
     type: "voice",
     provider: ttsProvider.name,
     model: null,
     idempotencyKey,
-    params: { narration },
+    params: { narration, voiceId: effectiveVoiceId },
     estimatedCostCents: estimateTTSCostCents({
       provider: ttsProvider.name,
       characterCount: narration.length,
@@ -417,8 +426,8 @@ async function executeVoiceJob(job: ProjectJob): Promise<string | null> {
   const stepId = await startStep(job.id, "generate_voice", 0);
 
   try {
-    const params = job.params as { narration: string };
-    const result = await withRetry(() => ttsProvider.generate({ text: params.narration }));
+    const params = job.params as { narration: string; voiceId?: string };
+    const result = await withRetry(() => ttsProvider.generate({ text: params.narration, voiceId: params.voiceId }));
 
     const storageKey = `projects/${job.projectId}/voice/${job.id}.mp3`;
     const uploaded = await storageProvider.putObject({
@@ -615,6 +624,15 @@ async function executeVisualJob(job: ProjectJob): Promise<string | null> {
     .where(and(eq(mediaAssets.jobId, job.id), eq(mediaAssets.type, "scene_image")));
   const doneSceneIds = new Set(doneAssets.map((a) => a.sceneId));
 
+  // Section 17: Brand Kit's defaultVisualStyle auto-applies to every scene
+  // unless this project set its own visualStyleOverride. Resolved once per
+  // batch, not per scene — it doesn't vary scene to scene.
+  const [projectRow] = await db.select().from(projects).where(eq(projects.id, job.projectId)).limit(1);
+  const [brandKit] = projectRow
+    ? await db.select().from(brandKits).where(eq(brandKits.ownerId, projectRow.ownerId)).limit(1)
+    : [];
+  const effectiveVisualStyle = projectRow?.visualStyleOverride ?? brandKit?.defaultVisualStyle ?? null;
+
   for (let i = 0; i < params.sceneIds.length; i++) {
     const sceneId = params.sceneIds[i];
     if (doneSceneIds.has(sceneId)) {
@@ -646,9 +664,12 @@ async function executeVisualJob(job: ProjectJob): Promise<string | null> {
         world && `Setting (must match exactly): ${worldSettingSummary(world)}`,
       ].filter((p): p is string => Boolean(p));
 
-      const prompt = lockedDetailsParts.length
-        ? `${scene.visualDescription}. ${lockedDetailsParts.join(". ")}.`
-        : scene.visualDescription;
+      const promptParts = [
+        scene.visualDescription,
+        ...lockedDetailsParts,
+        effectiveVisualStyle && `Visual style: ${effectiveVisualStyle}`,
+      ].filter((p): p is string => Boolean(p));
+      const prompt = `${promptParts.join(". ")}.`;
 
       const referenceImages: { uri: string; tag: string }[] = [];
       if (character) {
@@ -1434,6 +1455,40 @@ export async function moveScene(_prev: ActionState, formData: FormData): Promise
 
   await db.update(scenes).set({ order: b.order, updatedAt: new Date() }).where(eq(scenes.id, a.id));
   await db.update(scenes).set({ order: a.order, updatedAt: new Date() }).where(eq(scenes.id, b.id));
+
+  revalidatePath(`/projects/${project.id}`);
+  return { error: "" };
+}
+
+// --- Section 17: per-project Brand Kit overrides. Empty clears back to
+// inheriting the Owner's Brand Kit default; only future visual/voice
+// generations are affected, nothing already generated is touched. ---
+
+export async function updateProjectOverrides(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  const session = await auth();
+  if (!session?.user) {
+    redirect("/login");
+  }
+
+  const projectId = String(formData.get("projectId") ?? "");
+  const project = await loadOwnedProject(projectId, session.user.id);
+
+  const parsed = projectOverridesSchema.safeParse({
+    visualStyleOverride: formData.get("visualStyleOverride"),
+    voiceIdOverride: formData.get("voiceIdOverride"),
+  });
+  if (!parsed.success) {
+    return { error: "Check the override fields." };
+  }
+
+  await db
+    .update(projects)
+    .set({
+      visualStyleOverride: parsed.data.visualStyleOverride,
+      voiceIdOverride: parsed.data.voiceIdOverride,
+      updatedAt: new Date(),
+    })
+    .where(eq(projects.id, project.id));
 
   revalidatePath(`/projects/${project.id}`);
   return { error: "" };

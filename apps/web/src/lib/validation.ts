@@ -96,6 +96,24 @@ export const characterSchema = z
     path: ["permissionNotes"],
   });
 
+const hexColor = z.string().regex(/^#[0-9a-fA-F]{6}$/, "Use a 6-digit hex color like #3366FF");
+
+export const projectOverridesSchema = z.object({
+  visualStyleOverride: optionalField,
+  voiceIdOverride: optionalField,
+});
+
+export const brandKitSchema = z.object({
+  colors: z.array(hexColor).max(6),
+  fonts: optionalField,
+  captionStyle: optionalField,
+  watermarkEnabled: z.boolean(),
+  watermarkText: optionalField,
+  defaultVoiceId: optionalField,
+  defaultMusicMood: optionalField,
+  defaultVisualStyle: optionalField,
+});
+
 export const worldSchema = z.object({
   name: z.string().min(1).max(100),
   description: z.string().min(1).max(1000),

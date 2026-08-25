@@ -18,7 +18,7 @@ export class ElevenLabsTTSProvider implements TTSProvider {
       throw new Error("ELEVENLABS_API_KEY is not set.");
     }
 
-    const voiceId = process.env.ELEVENLABS_VOICE_ID ?? DEFAULT_VOICE_ID;
+    const voiceId = input.voiceId ?? process.env.ELEVENLABS_VOICE_ID ?? DEFAULT_VOICE_ID;
 
     const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`, {
       method: "POST",

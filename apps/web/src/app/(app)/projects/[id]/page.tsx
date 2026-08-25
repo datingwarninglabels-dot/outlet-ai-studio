@@ -16,6 +16,7 @@ import { isStalled } from "@/lib/jobs";
 import { assemblyProvider, imageProvider, storyboardProvider, ttsProvider, videoProvider } from "@/lib/providers";
 import { storageProvider } from "@/lib/storage-instance";
 import { loadOwnedProject } from "@/lib/authz";
+import { getOrCreateBrandKit } from "../../brand-kit/actions";
 import { listOwnedCharacters } from "../../characters/actions";
 import { listOwnedWorlds } from "../../worlds/actions";
 import {
@@ -48,6 +49,7 @@ import {
 import { GenerateAnimationForm } from "./animation-form";
 import { GenerateAssemblyForm } from "./assembly-form";
 import { JobConfirmCard, StalledJobCard } from "@/components/job-cards";
+import { ProjectOverridesForm } from "./project-overrides-form";
 import { ContinuityWarningsCard } from "./continuity-warnings";
 import { GenerateStoryboardForm, SceneEditForm } from "./scene-form";
 import { cancelThumbnails, confirmThumbnails, getThumbnailImageUrl, retryThumbnails } from "./thumbnail-actions";
@@ -82,9 +84,10 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
     .where(eq(scenes.projectId, project.id))
     .orderBy(asc(scenes.order));
 
-  const [ownedCharacters, ownedWorlds] = await Promise.all([
+  const [ownedCharacters, ownedWorlds, brandKit] = await Promise.all([
     listOwnedCharacters(session.user.id),
     listOwnedWorlds(session.user.id),
+    getOrCreateBrandKit(session.user.id),
   ]);
 
   const jobs = await db
@@ -232,6 +235,14 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
           {project.platform} · {project.status}
         </p>
       </div>
+
+      <ProjectOverridesForm
+        projectId={project.id}
+        visualStyleOverride={project.visualStyleOverride ?? ""}
+        voiceIdOverride={project.voiceIdOverride ?? ""}
+        brandKitDefaultVisualStyle={brandKit.defaultVisualStyle ?? ""}
+        brandKitDefaultVoiceId={brandKit.defaultVoiceId ?? ""}
+      />
 
       <section className="flex flex-col gap-3">
         <h2 className="text-sm font-medium text-muted">Script</h2>

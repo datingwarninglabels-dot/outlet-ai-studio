@@ -81,6 +81,12 @@ export const projects = pgTable("project", {
   title: text("title").notNull(),
   status: text("status").notNull().default("draft"),
   platform: text("platform"),
+  // Section 17: "automatically apply approved Brand Kit settings to new
+  // projects while allowing project overrides." Null means "inherit the
+  // Owner's Brand Kit default" (or no default at all); set means "use this
+  // instead for this project only."
+  visualStyleOverride: text("visual_style_override"),
+  voiceIdOverride: text("voice_id_override"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
@@ -350,6 +356,41 @@ export const worldCharacters = pgTable(
   },
   (wc) => [primaryKey({ columns: [wc.worldId, wc.characterId] })],
 );
+
+// Section 17: one Brand Kit per Owner (this is a single-Owner app, so
+// "reusable across projects" means exactly one row, not a library of
+// several) — auto-applied to new projects, with project.visualStyleOverride/
+// voiceIdOverride letting a specific project opt out. logo/intro/outro are
+// media_asset references (private storage, signed URLs, same as every
+// other uploaded asset in this app). Deliberately data-only for now on
+// fields with no rendering pipeline to consume them yet — see the
+// deliberate-scope-limits note in PLAN.md's M5 section.
+export const brandKits = pgTable("brand_kit", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  ownerId: text("owner_id")
+    .notNull()
+    .unique()
+    .references(() => users.id, { onDelete: "cascade" }),
+  logoAssetId: uuid("logo_asset_id").references(() => mediaAssets.id, { onDelete: "set null" }),
+  introAssetId: uuid("intro_asset_id").references(() => mediaAssets.id, { onDelete: "set null" }),
+  outroAssetId: uuid("outro_asset_id").references(() => mediaAssets.id, { onDelete: "set null" }),
+  // ["#RRGGBB", ...] — up to a handful of brand swatches.
+  colors: jsonb("colors").notNull().default([]),
+  fonts: text("fonts"),
+  captionStyle: text("caption_style"),
+  watermarkEnabled: boolean("watermark_enabled").notNull().default(false),
+  watermarkText: text("watermark_text"),
+  // Free-text ElevenLabs voice id, same pattern as character.assignedVoiceId
+  // — no Voice Library picker UI exists yet (Section 13).
+  defaultVoiceId: text("default_voice_id"),
+  defaultMusicMood: text("default_music_mood"),
+  // The one field with a real consumer today: appended to every scene's
+  // visual generation prompt (executeVisualJob) unless the project sets
+  // visualStyleOverride.
+  defaultVisualStyle: text("default_visual_style"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
 
 // Section 11's Continuity Checker: one row per scene visual that was
 // checked against its assigned character/world's locked details.

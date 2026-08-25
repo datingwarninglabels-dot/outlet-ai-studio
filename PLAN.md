@@ -185,6 +185,20 @@ using it is just risk with no benefit.
     way. Not done: background removal ("when supported" per spec — no
     verified provider support for it yet), safe-zone visualization beyond
     a sensible default text position.
+  - **Provider Hub** *(v1 done)*: makes the nav item real — shows every
+    provider slot (Anthropic, ElevenLabs, Runway, Shotstack, storage), what
+    each does, whether it's currently configured, and actual spend so far
+    (reusing the `usage_costs` data every generation leg already writes —
+    grouped by provider, scoped to the Owner via the `projects` join).
+    **Deliberately scoped down** from the full Section 18 spec: credentials
+    are still environment-variable-only, clearly labeled as such on the
+    page. Section 18 also wants add/test/disable/remove through the UI with
+    encrypted-at-rest storage overriding env vars — that would mean making
+    every provider's `isConfigured()`/credential access async and DB-backed,
+    which touches every call site across every generation leg's UI and
+    actions (7+ files). Given that blast radius, it's worth its own focused
+    pass rather than folding into this one silently under the same feature
+    name.
 - **M3**: World Library + Continuity Checker.
 - **M4**: Long-form resilience — resumable/retryable/idempotent scene-by-
   scene rendering at higher scene counts than tested so far.

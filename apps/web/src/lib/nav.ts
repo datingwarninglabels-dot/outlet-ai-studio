@@ -16,6 +16,6 @@ export const NAV_ITEMS: NavItem[] = [
   { label: "Thumbnail Studio", href: "/thumbnail-studio", status: "planned" },
   { label: "Media Library", href: "/media-library", status: "planned" },
   { label: "Brand Kit", href: "/brand-kit", status: "planned" },
-  { label: "Provider Hub", href: "/provider-hub", status: "planned" },
+  { label: "Provider Hub", href: "/provider-hub", status: "live" },
   { label: "Settings", href: "/settings", status: "live" },
 ];

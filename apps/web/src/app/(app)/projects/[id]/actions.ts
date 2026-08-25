@@ -8,6 +8,7 @@ import { db } from "@/db";
 import { generationJobs, mediaAssets, scenes, scripts } from "@/db/schema";
 import { loadOwnedProject } from "@/lib/authz";
 import {
+  estimateAssemblyCostCents,
   estimateGenerationCostCents,
   estimateImageCostCents,
   estimateTTSCostCents,
@@ -27,13 +28,16 @@ import {
   withRetry,
 } from "@/lib/jobs";
 import {
+  assemblyProvider,
   imageProvider,
   ratioForPlatform,
   scriptProvider,
+  shotstackAspectRatioForPlatform,
   storyboardProvider,
   ttsProvider,
   videoProvider,
 } from "@/lib/providers";
+import type { AssemblyCaption, AssemblyClip } from "@/lib/providers";
 import { storageProvider } from "@/lib/storage-instance";
 import { sceneUpdateSchema } from "@/lib/validation";
 
@@ -876,6 +880,249 @@ export async function retryAnimation(_prev: ActionState, formData: FormData): Pr
 }
 
 export async function getAnimationUrl(mediaAssetId: string): Promise<string> {
+  const session = await auth();
+  if (!session?.user) {
+    redirect("/login");
+  }
+
+  const [asset] = await db.select().from(mediaAssets).where(eq(mediaAssets.id, mediaAssetId)).limit(1);
+  if (!asset) {
+    throw new Error("Media asset not found.");
+  }
+  await loadOwnedProject(asset.projectId, session.user.id);
+  return storageProvider.getSignedUrl(asset.storageKey);
+}
+
+// --- Assembly: request → confirm → run. Composites every scene's visual
+// (animated clip if one exists, else the still image), the voice track,
+// and burned-in captions into one final MP4 via Shotstack. Unlike
+// Visual/Animation this is a single Shotstack render call for the whole
+// video, not resumable per scene — a retry re-submits the whole render,
+// since there's no meaningful "partial" render to resume. Requires every
+// scene to already have a visual; there's no partial-coverage mode (a scene
+// with no image/clip would leave a gap in the timeline while the audio
+// keeps playing over it, which is worse than just not offering this yet). ---
+
+export async function requestAssembly(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  const session = await auth();
+  if (!session?.user) {
+    redirect("/login");
+  }
+
+  const projectId = String(formData.get("projectId") ?? "");
+  const project = await loadOwnedProject(projectId, session.user.id);
+
+  const idempotencyKey = String(formData.get("idempotencyKey") ?? "");
+  if (!idempotencyKey) {
+    return { error: "Missing request key — reload the page and try again." };
+  }
+
+  if (!assemblyProvider.isConfigured()) {
+    return {
+      error:
+        "Video assembly isn't connected yet — add SHOTSTACK_API_KEY to your environment and restart the app.",
+    };
+  }
+  if (!storageProvider.isConfigured()) {
+    return {
+      error:
+        "Private storage isn't connected yet — set STORAGE_BUCKET/STORAGE_ACCESS_KEY_ID/STORAGE_SECRET_ACCESS_KEY and restart the app.",
+    };
+  }
+
+  const projectScenes = await db
+    .select()
+    .from(scenes)
+    .where(eq(scenes.projectId, project.id))
+    .orderBy(asc(scenes.order));
+
+  if (projectScenes.length === 0) {
+    return { error: "Generate a storyboard first." };
+  }
+
+  const [voiceAsset] = await db
+    .select()
+    .from(mediaAssets)
+    .where(and(eq(mediaAssets.projectId, project.id), eq(mediaAssets.type, "voice_audio")))
+    .limit(1);
+
+  if (!voiceAsset) {
+    return { error: "Generate a voice track first — the final video needs narration audio." };
+  }
+
+  const allAssets = await db.select().from(mediaAssets).where(eq(mediaAssets.projectId, project.id));
+  const visualSceneIds = new Set(
+    allAssets.filter((a) => a.type === "scene_image" || a.type === "scene_video").map((a) => a.sceneId),
+  );
+  const missingVisuals = projectScenes.filter((s) => !visualSceneIds.has(s.id));
+  if (missingVisuals.length > 0) {
+    return {
+      error: `${missingVisuals.length} scene${missingVisuals.length === 1 ? "" : "s"} still ${missingVisuals.length === 1 ? "needs" : "need"} a visual before the final video can be assembled.`,
+    };
+  }
+
+  const totalDurationSeconds = projectScenes.reduce((sum, s) => sum + (s.durationSeconds ?? 5), 0);
+  const aspectRatio = shotstackAspectRatioForPlatform(project.platform ?? "Custom Project");
+
+  await requestJob({
+    projectId: project.id,
+    type: "assembly",
+    provider: assemblyProvider.name,
+    model: null,
+    idempotencyKey,
+    params: { sceneIds: projectScenes.map((s) => s.id), aspectRatio },
+    estimatedCostCents: estimateAssemblyCostCents({
+      provider: assemblyProvider.name,
+      totalDurationSeconds,
+    }),
+  });
+
+  revalidatePath(`/projects/${project.id}`);
+  return { error: "" };
+}
+
+async function executeAssemblyJob(job: typeof generationJobs.$inferSelect): Promise<string | null> {
+  const stepId = await startStep(job.id, "assemble_video", 0);
+
+  try {
+    const params = job.params as { sceneIds: string[]; aspectRatio: "9:16" | "16:9" };
+
+    const [voiceAsset] = await db
+      .select()
+      .from(mediaAssets)
+      .where(and(eq(mediaAssets.projectId, job.projectId), eq(mediaAssets.type, "voice_audio")))
+      .orderBy(desc(mediaAssets.createdAt))
+      .limit(1);
+    if (!voiceAsset) {
+      throw new Error("Voice track no longer exists.");
+    }
+
+    const clips: AssemblyClip[] = [];
+    const captions: AssemblyCaption[] = [];
+    let cursor = 0;
+
+    for (const sceneId of params.sceneIds) {
+      const [scene] = await db.select().from(scenes).where(eq(scenes.id, sceneId)).limit(1);
+      if (!scene) {
+        throw new Error("A scene was deleted before assembly could run.");
+      }
+
+      const [videoAsset] = await db
+        .select()
+        .from(mediaAssets)
+        .where(and(eq(mediaAssets.sceneId, sceneId), eq(mediaAssets.type, "scene_video")))
+        .orderBy(desc(mediaAssets.createdAt))
+        .limit(1);
+
+      const [imageAsset] = videoAsset
+        ? []
+        : await db
+            .select()
+            .from(mediaAssets)
+            .where(and(eq(mediaAssets.sceneId, sceneId), eq(mediaAssets.type, "scene_image")))
+            .orderBy(desc(mediaAssets.createdAt))
+            .limit(1);
+
+      const asset = videoAsset ?? imageAsset;
+      if (!asset) {
+        throw new Error("A scene is missing its visual.");
+      }
+
+      const mediaUrl = await storageProvider.getSignedUrl(asset.storageKey, 1800);
+      const durationSeconds = scene.durationSeconds ?? 5;
+
+      clips.push({ mediaUrl, mediaType: videoAsset ? "video" : "image", durationSeconds });
+      captions.push({ text: scene.narration, startSeconds: cursor, durationSeconds });
+      cursor += durationSeconds;
+    }
+
+    const audioUrl = await storageProvider.getSignedUrl(voiceAsset.storageKey, 1800);
+
+    const result = await withRetry(() =>
+      assemblyProvider.assemble({ clips, audioUrl, captions, aspectRatio: params.aspectRatio }),
+    );
+
+    const storageKey = `projects/${job.projectId}/final-${job.id}.mp4`;
+    const uploaded = await storageProvider.putObject({
+      key: storageKey,
+      body: result.video,
+      contentType: result.contentType,
+    });
+
+    await db.insert(mediaAssets).values({
+      projectId: job.projectId,
+      jobId: job.id,
+      type: "final_video",
+      storageKey: uploaded.key,
+      contentType: result.contentType,
+      sizeBytes: uploaded.sizeBytes,
+      provider: result.provider,
+      metadata: { totalDurationSeconds: cursor },
+    });
+
+    await completeStep(stepId, { sizeBytes: uploaded.sizeBytes, totalDurationSeconds: cursor });
+    await completeJob(job.id);
+    return null;
+  } catch (err) {
+    const publicMsg = publicErrorMessage(err);
+    await failStep(stepId, publicMsg);
+    await failJob(job.id, publicMsg, err instanceof Error ? (err.stack ?? err.message) : String(err));
+    return publicMsg;
+  }
+}
+
+export async function confirmAssembly(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  const session = await auth();
+  if (!session?.user) {
+    redirect("/login");
+  }
+
+  const jobId = String(formData.get("jobId") ?? "");
+  const job = await getOwnedJob(jobId, session.user.id);
+
+  const confirmed = await confirmJob(jobId);
+  if (confirmed.status !== "running") {
+    revalidatePath(`/projects/${job.projectId}`);
+    return { error: "" };
+  }
+
+  const error = await executeAssemblyJob(confirmed);
+  revalidatePath(`/projects/${job.projectId}`);
+  return { error: error ?? "" };
+}
+
+export async function cancelAssembly(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  const session = await auth();
+  if (!session?.user) {
+    redirect("/login");
+  }
+
+  const jobId = String(formData.get("jobId") ?? "");
+  const job = await getOwnedJob(jobId, session.user.id);
+  await cancelJob(jobId);
+  revalidatePath(`/projects/${job.projectId}`);
+  return { error: "" };
+}
+
+export async function retryAssembly(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  const session = await auth();
+  if (!session?.user) {
+    redirect("/login");
+  }
+
+  const jobId = String(formData.get("jobId") ?? "");
+  const job = await getOwnedJob(jobId, session.user.id);
+
+  if (!isStalled(job)) {
+    return { error: "This job isn't stalled." };
+  }
+
+  const error = await executeAssemblyJob(job);
+  revalidatePath(`/projects/${job.projectId}`);
+  return { error: error ?? "" };
+}
+
+export async function getFinalVideoUrl(mediaAssetId: string): Promise<string> {
   const session = await auth();
   if (!session?.user) {
     redirect("/login");

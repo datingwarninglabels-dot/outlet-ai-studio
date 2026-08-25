@@ -87,3 +87,17 @@ export function estimateVideoCostCents(input: { provider: string; durationSecond
   }
   return input.durationSeconds * pricePerSecond;
 }
+
+// Confirmed against shotstack.io/pricing (2026-08): $0.30/min pay-as-you-go
+// at 1080p ("hd" resolution). Re-check if Shotstack changes their pricing.
+const ASSEMBLY_PRICE_CENTS_PER_MINUTE: Record<string, number> = {
+  shotstack: 30,
+};
+
+export function estimateAssemblyCostCents(input: { provider: string; totalDurationSeconds: number }): number {
+  const pricePerMinute = ASSEMBLY_PRICE_CENTS_PER_MINUTE[input.provider];
+  if (pricePerMinute === undefined) {
+    throw new Error(`No price table entry for assembly provider "${input.provider}" — add one before estimating cost.`);
+  }
+  return Math.max(1, Math.ceil((input.totalDurationSeconds / 60) * pricePerMinute));
+}

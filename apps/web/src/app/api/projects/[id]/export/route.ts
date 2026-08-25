@@ -53,10 +53,10 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
       `Outlet AI Studio export — ${project.title}`,
       `Platform: ${project.platform ?? "unspecified"}`,
       "",
-      "This package contains everything generated for this project so far.",
-      "It does NOT include an assembled final video — compositing the",
-      "per-scene animated clips, voice track, and captions into one video",
-      "file isn't built yet.",
+      "This package contains everything generated for this project so far,",
+      "including final-video.mp4 (the assembled video) if one has been",
+      "generated on the project page — otherwise there's no assembled video",
+      "here, just the raw clips/audio/captions to assemble yourself.",
       "",
       "captions.srt/.vtt: one caption per scene, timed from each scene's",
       "estimated duration — not word-level synced, since there's no speech",
@@ -102,7 +102,9 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
             ? `visual-scene-${asset.sceneId ?? asset.id}.${asset.contentType.includes("png") ? "png" : "jpg"}`
             : asset.type === "scene_video"
               ? `animation-scene-${asset.sceneId ?? asset.id}.${asset.contentType.includes("mp4") ? "mp4" : "mov"}`
-              : `${asset.type}-${asset.id}`;
+              : asset.type === "final_video"
+                ? "final-video.mp4"
+                : `${asset.type}-${asset.id}`;
       zip.file(filename, bytes);
     } catch {
       // Storage may have been reconfigured since this asset was generated —

@@ -4,26 +4,30 @@ import { auth } from "@/auth";
 import { db } from "@/db";
 import { generationJobs, mediaAssets, scenes, scripts, usageCosts } from "@/db/schema";
 import { isStalled } from "@/lib/jobs";
-import { imageProvider, storyboardProvider, ttsProvider, videoProvider } from "@/lib/providers";
+import { assemblyProvider, imageProvider, storyboardProvider, ttsProvider, videoProvider } from "@/lib/providers";
 import { storageProvider } from "@/lib/storage-instance";
 import { loadOwnedProject } from "@/lib/authz";
 import {
   cancelAnimation,
+  cancelAssembly,
   cancelScript,
   cancelStoryboard,
   cancelVisual,
   cancelVoice,
   confirmAnimation,
+  confirmAssembly,
   confirmScript,
   confirmStoryboard,
   confirmVisual,
   confirmVoice,
   getAnimationUrl,
+  getFinalVideoUrl,
   getVisualUrl,
   getVoicePlaybackUrl,
   moveScene,
   requestStoryboard,
   retryAnimation,
+  retryAssembly,
   retryScript,
   retryStoryboard,
   retryVisual,
@@ -31,6 +35,7 @@ import {
   updateScene,
 } from "./actions";
 import { GenerateAnimationForm } from "./animation-form";
+import { GenerateAssemblyForm } from "./assembly-form";
 import { JobConfirmCard, StalledJobCard } from "./job-cards";
 import { GenerateStoryboardForm, SceneEditForm } from "./scene-form";
 import { GenerateVisualForm } from "./visual-form";
@@ -74,6 +79,7 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
   const voiceJob = jobs.find((job) => job.type === "voice");
   const visualJob = jobs.find((job) => job.type === "visual");
   const animationJob = jobs.find((job) => job.type === "animation");
+  const assemblyJob = jobs.find((job) => job.type === "assembly");
 
   const [scriptCost] = scriptJob
     ? await db.select().from(usageCosts).where(eq(usageCosts.jobId, scriptJob.id)).limit(1)
@@ -89,6 +95,9 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
     : [];
   const [animationCost] = animationJob
     ? await db.select().from(usageCosts).where(eq(usageCosts.jobId, animationJob.id)).limit(1)
+    : [];
+  const [assemblyCost] = assemblyJob
+    ? await db.select().from(usageCosts).where(eq(usageCosts.jobId, assemblyJob.id)).limit(1)
     : [];
 
   const [voiceAsset] = voiceJob
@@ -126,6 +135,21 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
   const scenesRemainingForAnimation = scenesAnimatable.filter(
     (s) => !animationsBySceneId.has(s.id),
   ).length;
+
+  const [voiceAssetForAssembly] = await db
+    .select()
+    .from(mediaAssets)
+    .where(and(eq(mediaAssets.projectId, project.id), eq(mediaAssets.type, "voice_audio")))
+    .limit(1);
+  const scenesMissingVisual = projectScenes.filter((s) => !visualsBySceneId.has(s.id)).length;
+
+  const [finalVideoAsset] = await db
+    .select()
+    .from(mediaAssets)
+    .where(and(eq(mediaAssets.projectId, project.id), eq(mediaAssets.type, "final_video")))
+    .orderBy(desc(mediaAssets.createdAt))
+    .limit(1);
+  const finalVideoUrl = finalVideoAsset ? await getFinalVideoUrl(finalVideoAsset.id) : null;
 
   return (
     <div className="flex max-w-2xl flex-col gap-8">
@@ -451,12 +475,67 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
       </section>
 
       <section className="flex flex-col gap-3">
+        <h2 className="text-sm font-medium text-muted">Final video</h2>
+
+        {assemblyJob?.status === "awaiting_confirmation" && assemblyCost && (
+          <JobConfirmCard
+            jobId={assemblyJob.id}
+            estimatedCostCents={assemblyCost.estimatedCostCents}
+            provider={assemblyJob.provider}
+            model={assemblyJob.model}
+            label="video assembly"
+            confirmAction={confirmAssembly}
+            cancelAction={cancelAssembly}
+          />
+        )}
+        {assemblyJob?.status === "running" && isStalled(assemblyJob) && (
+          <StalledJobCard jobId={assemblyJob.id} label="Video assembly" retryAction={retryAssembly} />
+        )}
+        {assemblyJob?.status === "failed" && (
+          <p className="rounded-lg border border-dashed border-red-400/40 p-6 text-sm text-red-400">
+            Video assembly failed: {assemblyJob.error}
+          </p>
+        )}
+
+        {finalVideoUrl ? (
+          <div className="rounded-lg border border-border bg-surface p-4">
+            <video controls src={finalVideoUrl} className="w-full rounded" />
+            <p className="mt-2 text-xs text-muted">{finalVideoAsset?.provider}</p>
+          </div>
+        ) : (
+          (!assemblyJob || assemblyJob.status === "failed" || assemblyJob.status === "cancelled") && (
+            <div className="flex flex-col gap-3 rounded-lg border border-dashed border-border p-6">
+              <p className="text-sm text-muted">
+                {assemblyJob
+                  ? "Try again — this creates a new render request."
+                  : "Composites every scene's clip (animated if available, else the still image), the voice track, and burned-in captions into one MP4."}
+              </p>
+              <GenerateAssemblyForm
+                projectId={project.id}
+                disabledReason={
+                  !voiceAssetForAssembly
+                    ? "Generate a voice track first — the final video needs narration audio."
+                    : scenesMissingVisual > 0
+                      ? `${scenesMissingVisual} scene${scenesMissingVisual === 1 ? "" : "s"} still ${scenesMissingVisual === 1 ? "needs" : "need"} a visual.`
+                      : !assemblyProvider.isConfigured()
+                        ? "Video assembly isn't connected yet — add SHOTSTACK_API_KEY to your environment and restart the app."
+                        : !storageProvider.isConfigured()
+                          ? "Private storage isn't connected yet — set STORAGE_BUCKET/STORAGE_ACCESS_KEY_ID/STORAGE_SECRET_ACCESS_KEY and restart the app."
+                          : null
+                }
+              />
+            </div>
+          )
+        )}
+      </section>
+
+      <section className="flex flex-col gap-3">
         <h2 className="text-sm font-medium text-muted">Export</h2>
         {script || projectScenes.length > 0 ? (
           <div className="flex flex-col gap-2 rounded-lg border border-border bg-surface p-4">
             <p className="text-sm text-muted">
               A .zip with everything generated so far — script, scene list, SRT/VTT captions, voice
-              track, still visuals, and animated clips. Not an assembled final video yet.
+              track, still visuals, animated clips, and the assembled final video if one exists.
             </p>
             <a
               href={`/api/projects/${project.id}/export`}
@@ -503,8 +582,7 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
       </section>
 
       <p className="text-xs text-muted">
-        Export packages what&apos;s generated so far — it doesn&apos;t assemble a final video from
-        the animated clips, voice track, and captions. Thumbnail Studio isn&apos;t wired up yet.
+        Thumbnail Studio isn&apos;t wired up yet.
       </p>
     </div>
   );

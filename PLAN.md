@@ -25,7 +25,8 @@ Source spec: [docs/master-prompt.md](./docs/master-prompt.md).
 | LLM/script   | Claude (Anthropic API) | Script/storyboard structuring            |
 | TTS          | ElevenLabs API          | Multi-speaker, per-character billing     |
 | Image gen    | Runway (`gen4_image`)  | Verified against dev.runwayml.com docs; 5 credits/720p image |
-| Video gen    | Runway (`gen4.5`, image-to-video) | Same account as image gen; animation pipeline not built yet |
+| Video gen (animate) | Runway (`gen4_turbo`, image-to-video) | Same account as image gen; 5 credits/sec |
+| Video assembly | Shotstack             | Cloud rendering API, not self-hosted ffmpeg — see M1 Assembly note |
 | Stock media  | Pexels                 | Cost Saver mode fallback                 |
 | Research     | Web search tool         | Researched Mode sourcing                 |
 
@@ -47,7 +48,8 @@ using it is just risk with no benefit.
   11-section dashboard shell with honest empty/placeholder states. No AI
   calls.
 - **M1 — Vertical slice** *(done)*: idea → script → scene breakdown → voice
-  → visual → downloadable package, all via adapter interfaces
+  → visual → animate → assembled final video → downloadable package, all
+  via adapter interfaces
   (`ScriptProvider`/`AnthropicScriptProvider`,
   `StoryboardProvider`/`AnthropicStoryboardProvider`,
   `TTSProvider`/`ElevenLabsTTSProvider`, `ImageProvider`/`RunwayImageProvider`,
@@ -92,20 +94,33 @@ using it is just risk with no benefit.
     as a plain URL string, `model: gen4_turbo`, `duration: 5 | 10`, shared
     ratio values) and `gen4_turbo` pricing (5 credits/sec, $0.05/sec) were
     verified against Runway's docs the same way as the image leg.
+  - **Assembly**: composites every scene's clip (its animation if one
+    exists, else the still image), the voice track, and burned-in captions
+    into one final MP4 — via a cloud rendering API (Shotstack) rather than
+    self-hosted ffmpeg. That choice was deliberate, not a default: bundling
+    an ffmpeg binary is a real risk specifically for a serverless deploy
+    target (Vercel) — large binary, read-only filesystem outside `/tmp`,
+    function execution time limits video encoding can plausibly exceed.
+    Shotstack renders over HTTP with no binary/runtime footprint on our
+    side, at the cost of a new paid provider ($0.30/min PAYG, verified
+    against shotstack.io/pricing, with a free `stage` sandbox for testing —
+    `SHOTSTACK_ENV=stage`). Requires every scene to already have a visual;
+    there's no partial-coverage mode, since a scene missing a clip would
+    leave a gap in the timeline while the audio kept playing over it. One
+    Shotstack render call per request — unlike Visual/Animation this isn't
+    resumable per scene (nothing meaningful to resume mid-render), so retry
+    just resubmits the whole render.
   - **Export**: a free (no new provider cost, so no cost-gate) `.zip`
     download — script, scene list, SRT/VTT captions, voice track, still
-    visuals, animated clips — via `/api/projects/[id]/export`. Explicitly
-    **not** an assembled final video; that needs real video compositing
-    (ffmpeg or equivalent), which is a large enough, risky enough addition
-    (server runtime/binary concerns, especially for a serverless deploy
-    target) that it's worth its own milestone rather than folding in here
-    unverified. Captions (`captions.ts`) are one cue per scene, timed from
-    each scene's estimated duration — no word-level sync, since there's no
-    speech alignment against the actual generated audio. Pure computation,
-    no provider involved, so this is the one piece of the whole app actually
-    verified working end to end in this environment (ran it directly
-    against sample scene data — cumulative timestamps and SRT/VTT
-    formatting both correct) rather than only typechecked/built.
+    visuals, animated clips, and `final-video.mp4` if one has been
+    assembled — via `/api/projects/[id]/export`. Captions (`captions.ts`)
+    are one cue per scene, timed from each scene's estimated duration — no
+    word-level sync, since there's no speech alignment against the actual
+    generated audio. Pure computation, no provider involved, so this is the
+    one piece of the whole app actually verified working end to end in this
+    environment (ran it directly against sample scene data — cumulative
+    timestamps and SRT/VTT formatting both correct) rather than only
+    typechecked/built.
 - **M1.5 — Job resilience, cost gate, scene breakdown** *(done)*: closed two
   structural gaps from M1 before more (and more expensive) generation types
   build on top of them.
@@ -159,10 +174,11 @@ using it is just risk with no benefit.
 
 ## Credentials needed (not all at once — per milestone)
 
-Anthropic API key · ElevenLabs API key · Runway API key · an image-gen
-provider key · Pexels API key · Postgres connection · R2 or S3 keys · Redis
-(Upstash, for M1's job queue) · Google OAuth client ID/secret · hosting
-(Vercel for web, Railway/Fly.io for worker+Redis).
+Anthropic API key · ElevenLabs API key · Runway API key (image + video) ·
+Shotstack API key (assembly) · Pexels API key · Postgres connection · R2 or
+S3 keys · Google OAuth client ID/secret · hosting (Vercel for web — no
+separate worker/Redis needed for M1, since generation stays in-process and
+video rendering is delegated to Shotstack rather than self-hosted).
 
 None of these are needed to run M0 beyond Postgres and Google OAuth — see
 the root `README.md` for setup steps.

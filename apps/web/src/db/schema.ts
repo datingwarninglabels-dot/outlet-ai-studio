@@ -200,6 +200,7 @@ export const mediaAssets = pgTable("media_asset", {
     .notNull()
     .references(() => projects.id, { onDelete: "cascade" }),
   jobId: uuid("job_id").references(() => generationJobs.id, { onDelete: "set null" }),
+  sceneId: uuid("scene_id").references(() => scenes.id, { onDelete: "set null" }),
   type: text("type").notNull(),
   storageKey: text("storage_key").notNull(),
   contentType: text("content_type").notNull(),

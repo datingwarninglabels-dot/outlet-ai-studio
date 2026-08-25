@@ -4,26 +4,31 @@ import { auth } from "@/auth";
 import { db } from "@/db";
 import { generationJobs, mediaAssets, scenes, scripts, usageCosts } from "@/db/schema";
 import { isStalled } from "@/lib/jobs";
-import { storyboardProvider, ttsProvider } from "@/lib/providers";
+import { imageProvider, storyboardProvider, ttsProvider } from "@/lib/providers";
 import { storageProvider } from "@/lib/storage-instance";
 import { loadOwnedProject } from "@/lib/authz";
 import {
   cancelScript,
   cancelStoryboard,
+  cancelVisual,
   cancelVoice,
   confirmScript,
   confirmStoryboard,
+  confirmVisual,
   confirmVoice,
+  getVisualUrl,
   getVoicePlaybackUrl,
   moveScene,
   requestStoryboard,
   retryScript,
   retryStoryboard,
+  retryVisual,
   retryVoice,
   updateScene,
 } from "./actions";
 import { JobConfirmCard, StalledJobCard } from "./job-cards";
 import { GenerateStoryboardForm, SceneEditForm } from "./scene-form";
+import { GenerateVisualForm } from "./visual-form";
 import { GenerateVoiceForm } from "./voice-form";
 
 export default async function ProjectDetailPage({ params }: { params: Promise<{ id: string }> }) {
@@ -62,6 +67,7 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
   const scriptJob = jobs.find((job) => job.type === "script");
   const storyboardJob = jobs.find((job) => job.type === "storyboard");
   const voiceJob = jobs.find((job) => job.type === "voice");
+  const visualJob = jobs.find((job) => job.type === "visual");
 
   const [scriptCost] = scriptJob
     ? await db.select().from(usageCosts).where(eq(usageCosts.jobId, scriptJob.id)).limit(1)
@@ -72,6 +78,9 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
   const [voiceCost] = voiceJob
     ? await db.select().from(usageCosts).where(eq(usageCosts.jobId, voiceJob.id)).limit(1)
     : [];
+  const [visualCost] = visualJob
+    ? await db.select().from(usageCosts).where(eq(usageCosts.jobId, visualJob.id)).limit(1)
+    : [];
 
   const [voiceAsset] = voiceJob
     ? await db
@@ -81,6 +90,15 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
         .limit(1)
     : [];
   const voicePlaybackUrl = voiceAsset ? await getVoicePlaybackUrl(voiceAsset.id) : null;
+
+  const [visualAsset] = visualJob
+    ? await db
+        .select()
+        .from(mediaAssets)
+        .where(eq(mediaAssets.jobId, visualJob.id))
+        .limit(1)
+    : [];
+  const visualUrl = visualAsset ? await getVisualUrl(visualAsset.id) : null;
 
   return (
     <div className="flex max-w-2xl flex-col gap-8">
@@ -272,6 +290,82 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
       </section>
 
       <section className="flex flex-col gap-3">
+        <h2 className="text-sm font-medium text-muted">Visual</h2>
+
+        {visualJob?.status === "awaiting_confirmation" && visualCost && (
+          <JobConfirmCard
+            jobId={visualJob.id}
+            estimatedCostCents={visualCost.estimatedCostCents}
+            provider={visualJob.provider}
+            model={visualJob.model}
+            label="visual generation"
+            confirmAction={confirmVisual}
+            cancelAction={cancelVisual}
+          />
+        )}
+        {visualJob?.status === "running" && isStalled(visualJob) && (
+          <StalledJobCard jobId={visualJob.id} label="Visual generation" retryAction={retryVisual} />
+        )}
+        {visualJob?.status === "failed" && (
+          <p className="rounded-lg border border-dashed border-red-400/40 p-6 text-sm text-red-400">
+            Visual generation failed: {visualJob.error}
+          </p>
+        )}
+
+        {visualUrl ? (
+          <div className="rounded-lg border border-border bg-surface p-4">
+            {/* eslint-disable-next-line @next/next/no-img-element -- signed private-storage URL, not an optimizable static asset */}
+            <img src={visualUrl} alt="Generated visual for scene 1" className="w-full rounded-lg" />
+            <p className="mt-2 text-xs text-muted">{visualAsset?.provider}</p>
+          </div>
+        ) : (
+          (!visualJob || visualJob.status === "failed" || visualJob.status === "cancelled") && (
+            <div className="flex flex-col gap-3 rounded-lg border border-dashed border-border p-6">
+              <p className="text-sm text-muted">
+                {visualJob
+                  ? "Try again — this creates a new generation request."
+                  : "No visual yet. M1 generates a still image for scene 1 only — per-scene visuals for the rest of the list, and animating this into video, come later."}
+              </p>
+              <GenerateVisualForm
+                projectId={project.id}
+                disabledReason={
+                  projectScenes.length === 0
+                    ? "Generate a storyboard first — the visual is built from scene 1's description."
+                    : !imageProvider.isConfigured()
+                      ? "Visual generation isn't connected yet — add RUNWAYML_API_SECRET to your environment and restart the app."
+                      : !storageProvider.isConfigured()
+                        ? "Private storage isn't connected yet — set STORAGE_BUCKET/STORAGE_ACCESS_KEY_ID/STORAGE_SECRET_ACCESS_KEY and restart the app."
+                        : null
+                }
+              />
+            </div>
+          )
+        )}
+      </section>
+
+      <section className="flex flex-col gap-3">
+        <h2 className="text-sm font-medium text-muted">Export</h2>
+        {script || projectScenes.length > 0 ? (
+          <div className="flex flex-col gap-2 rounded-lg border border-border bg-surface p-4">
+            <p className="text-sm text-muted">
+              A .zip with everything generated so far — script, scene list, voice track, and visual.
+              Not an assembled final video yet.
+            </p>
+            <a
+              href={`/api/projects/${project.id}/export`}
+              className="h-11 w-fit rounded-lg border border-border px-4 text-sm font-medium leading-[44px] hover:bg-surface-raised"
+            >
+              Download package
+            </a>
+          </div>
+        ) : (
+          <p className="rounded-lg border border-dashed border-border p-6 text-sm text-muted">
+            Nothing to export yet.
+          </p>
+        )}
+      </section>
+
+      <section className="flex flex-col gap-3">
         <h2 className="text-sm font-medium text-muted">Generation jobs</h2>
         <ul className="flex flex-col gap-2">
           {jobs.map((job) => (
@@ -302,8 +396,8 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
       </section>
 
       <p className="text-xs text-muted">
-        Visuals and export aren&apos;t wired up yet — this page shows what Create Video, the
-        storyboard step, and voice generation have produced so far.
+        Export packages what&apos;s generated so far — it doesn&apos;t assemble a final video.
+        Multi-scene visuals, animation, captions, and thumbnails aren&apos;t wired up yet.
       </p>
     </div>
   );

@@ -43,6 +43,13 @@
       "when": 1787621357980,
       "tag": "0005_faithful_valkyrie",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1787621875848,
+      "tag": "0006_curved_darkstar",
+      "breakpoints": true
     }
   ]
 }

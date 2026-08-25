@@ -52,4 +52,20 @@ export class S3StorageProvider implements StorageProvider {
       { expiresIn: expiresInSeconds },
     );
   }
+
+  async getObject(key: string): Promise<Buffer> {
+    if (!this.isConfigured()) {
+      throw new Error("Object storage is not configured.");
+    }
+
+    const result = await this.client().send(
+      new GetObjectCommand({ Bucket: process.env.STORAGE_BUCKET!, Key: key }),
+    );
+    const bytes = await result.Body?.transformToByteArray();
+    if (!bytes) {
+      throw new Error(`Object storage returned no body for key "${key}".`);
+    }
+
+    return Buffer.from(bytes);
+  }
 }

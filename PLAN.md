@@ -24,8 +24,8 @@ Source spec: [docs/master-prompt.md](./docs/master-prompt.md).
 | ------------ | ---------------------- | ---------------------------------------- |
 | LLM/script   | Claude (Anthropic API) | Script/storyboard structuring            |
 | TTS          | ElevenLabs API          | Multi-speaker, per-character billing     |
-| Video gen    | Runway                 | Primary adapter; most expensive calls    |
-| Image gen    | Flux or Ideogram        | Thumbnails, character sheets, previews   |
+| Image gen    | Runway (`gen4_image`)  | Verified against dev.runwayml.com docs; 5 credits/720p image |
+| Video gen    | Runway (`gen4.5`, image-to-video) | Same account as image gen; animation pipeline not built yet |
 | Stock media  | Pexels                 | Cost Saver mode fallback                 |
 | Research     | Web search tool         | Researched Mode sourcing                 |
 
@@ -46,22 +46,42 @@ using it is just risk with no benefit.
   public sign-up), Postgres schema, private-storage-ready structure, static
   11-section dashboard shell with honest empty/placeholder states. No AI
   calls.
-- **M1 — Vertical slice** *(in progress)*: idea → script → scene breakdown →
-  1 TTS voice → 1 AI image/video scene → assembled export → downloadable
-  package. **Idea → script**, **script → scene breakdown**, and **scenes →
-  voice** legs are done, all via adapter interfaces
+- **M1 — Vertical slice** *(done)*: idea → script → scene breakdown → voice
+  → visual → downloadable package, all via adapter interfaces
   (`ScriptProvider`/`AnthropicScriptProvider`,
   `StoryboardProvider`/`AnthropicStoryboardProvider`,
-  `TTSProvider`/`ElevenLabsTTSProvider`, Section 18-style — swapping
-  providers later won't touch product code) and all gated by the M1.5 cost
-  gate and job resilience machinery. Voice generation combines every scene's
-  narration into one track (Voice Studio's multi-speaker/per-character
-  assignment is Section 13 scope, not this slice) and requires private
-  object storage to be configured first — generated audio is copied into
-  R2/S3 via a `StorageProvider`/`S3StorageProvider` adapter and only ever
-  served back through short-lived signed URLs, never a temporary provider
-  link, per Section 19. New `media_asset` table tracks it. Not yet built:
-  image/video generation, export.
+  `TTSProvider`/`ElevenLabsTTSProvider`, `ImageProvider`/`RunwayImageProvider`,
+  Section 18-style — swapping providers later won't touch product code),
+  every generation leg gated by the M1.5 cost gate and job resilience
+  machinery.
+  - **Voice**: combines every scene's narration into one track
+    (Voice Studio's multi-speaker/per-character assignment is Section 13
+    scope, not this slice).
+  - **Visual**: generates one still image (Runway `gen4_image`,
+    text-to-image) for scene 1 only — per-scene visuals for the rest of the
+    list, and animating this into video via Runway's image-to-video
+    endpoint, are both deferred. Runway's request/response shapes here were
+    verified against their published docs (base URL, auth/version headers,
+    endpoint bodies, task-polling status values, and `gen4_image` credit
+    pricing) rather than assumed from memory, unlike the cost-estimate
+    tables elsewhere which are still best-effort approximations. Generation
+    is async (submit → poll → download) and can take up to ~2 minutes,
+    handled by polling inside the provider call rather than a separate UI
+    step — still fine to run in-process for now (a single slow request, not
+    yet the multi-minute-job case that would justify standing up a real
+    worker), but this is the leg most likely to outgrow that first.
+  - Both require private object storage configured first — generated media
+    is copied into R2/S3 via a `StorageProvider`/`S3StorageProvider` adapter
+    and only ever served back through short-lived signed URLs, never a
+    temporary provider link, per Section 19. New `media_asset` table tracks
+    both.
+  - **Export**: a free (no new provider cost, so no cost-gate) `.zip`
+    download — script, scene list, voice track, visual — via
+    `/api/projects/[id]/export`. Explicitly **not** an assembled final
+    video; that needs real video compositing (ffmpeg or equivalent), which
+    is a large enough, risky enough addition (server runtime/binary
+    concerns, especially for a serverless deploy target) that it's worth
+    its own milestone rather than folding in here unverified.
 - **M1.5 — Job resilience, cost gate, scene breakdown** *(done)*: closed two
   structural gaps from M1 before more (and more expensive) generation types
   build on top of them.

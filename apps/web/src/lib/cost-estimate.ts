@@ -57,3 +57,18 @@ export function estimateTTSCostCents(input: { provider: string; characterCount: 
 
   return Math.max(1, Math.ceil((input.characterCount / 1000) * pricePerThousand));
 }
+
+// Confirmed against docs.dev.runwayml.com/guides/pricing (2026-08): gen4_image
+// is 5 credits per 720p image at $0.01/credit = 5 cents flat. Re-check if
+// Runway changes their credit pricing.
+const IMAGE_PRICE_CENTS_PER_GENERATION: Record<string, number> = {
+  runway: 5,
+};
+
+export function estimateImageCostCents(provider: string): number {
+  const price = IMAGE_PRICE_CENTS_PER_GENERATION[provider];
+  if (price === undefined) {
+    throw new Error(`No price table entry for image provider "${provider}" — add one before estimating cost.`);
+  }
+  return price;
+}

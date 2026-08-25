@@ -7,7 +7,11 @@ import { auth } from "@/auth";
 import { db } from "@/db";
 import { generationJobs, mediaAssets, scenes, scripts } from "@/db/schema";
 import { loadOwnedProject } from "@/lib/authz";
-import { estimateGenerationCostCents, estimateTTSCostCents } from "@/lib/cost-estimate";
+import {
+  estimateGenerationCostCents,
+  estimateImageCostCents,
+  estimateTTSCostCents,
+} from "@/lib/cost-estimate";
 import {
   cancelJob,
   completeJob,
@@ -21,7 +25,7 @@ import {
   startStep,
   withRetry,
 } from "@/lib/jobs";
-import { scriptProvider, storyboardProvider, ttsProvider } from "@/lib/providers";
+import { imageProvider, ratioForPlatform, scriptProvider, storyboardProvider, ttsProvider } from "@/lib/providers";
 import { storageProvider } from "@/lib/storage-instance";
 import { sceneUpdateSchema } from "@/lib/validation";
 
@@ -430,6 +434,174 @@ export async function retryVoice(_prev: ActionState, formData: FormData): Promis
 }
 
 export async function getVoicePlaybackUrl(mediaAssetId: string): Promise<string> {
+  const session = await auth();
+  if (!session?.user) {
+    redirect("/login");
+  }
+
+  const [asset] = await db.select().from(mediaAssets).where(eq(mediaAssets.id, mediaAssetId)).limit(1);
+  if (!asset) {
+    throw new Error("Media asset not found.");
+  }
+  await loadOwnedProject(asset.projectId, session.user.id);
+  return storageProvider.getSignedUrl(asset.storageKey);
+}
+
+// --- Visual: request → confirm → run. M1's vertical slice covers exactly
+// one scene's visual (the first) — per-scene visuals for the rest of the
+// list, and image-to-video animation on top of this still image, are both
+// deferred: animating requires a second async Runway call over a publicly
+// fetchable image URL and is worth building once there's a real API key to
+// test the round trip against, rather than shipping it unverified. ---
+
+export async function requestVisual(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  const session = await auth();
+  if (!session?.user) {
+    redirect("/login");
+  }
+
+  const projectId = String(formData.get("projectId") ?? "");
+  const project = await loadOwnedProject(projectId, session.user.id);
+
+  const idempotencyKey = String(formData.get("idempotencyKey") ?? "");
+  if (!idempotencyKey) {
+    return { error: "Missing request key — reload the page and try again." };
+  }
+
+  if (!imageProvider.isConfigured()) {
+    return {
+      error:
+        "Visual generation isn't connected yet — add RUNWAYML_API_SECRET to your environment and restart the app.",
+    };
+  }
+  if (!storageProvider.isConfigured()) {
+    return {
+      error:
+        "Private storage isn't connected yet — set STORAGE_BUCKET/STORAGE_ACCESS_KEY_ID/STORAGE_SECRET_ACCESS_KEY and restart the app.",
+    };
+  }
+
+  const [firstScene] = await db
+    .select()
+    .from(scenes)
+    .where(eq(scenes.projectId, project.id))
+    .orderBy(asc(scenes.order))
+    .limit(1);
+
+  if (!firstScene) {
+    return { error: "Generate a storyboard first — the visual is built from scene 1's description." };
+  }
+
+  await requestJob({
+    projectId: project.id,
+    type: "visual",
+    provider: imageProvider.name,
+    model: null,
+    idempotencyKey,
+    params: {
+      sceneId: firstScene.id,
+      prompt: firstScene.visualDescription,
+      ratio: ratioForPlatform(project.platform ?? "Custom Project"),
+    },
+    estimatedCostCents: estimateImageCostCents(imageProvider.name),
+  });
+
+  revalidatePath(`/projects/${project.id}`);
+  return { error: "" };
+}
+
+async function executeVisualJob(job: typeof generationJobs.$inferSelect): Promise<string | null> {
+  const stepId = await startStep(job.id, "generate_visual", 0);
+
+  try {
+    const params = job.params as { sceneId: string; prompt: string; ratio: string };
+    const result = await withRetry(() =>
+      imageProvider.generate({ prompt: params.prompt, ratio: params.ratio }),
+    );
+
+    const extension = result.contentType.includes("png") ? "png" : "jpg";
+    const storageKey = `projects/${job.projectId}/scenes/${params.sceneId}/visual-${job.id}.${extension}`;
+    const uploaded = await storageProvider.putObject({
+      key: storageKey,
+      body: result.image,
+      contentType: result.contentType,
+    });
+
+    await db.insert(mediaAssets).values({
+      projectId: job.projectId,
+      jobId: job.id,
+      sceneId: params.sceneId,
+      type: "scene_image",
+      storageKey: uploaded.key,
+      contentType: result.contentType,
+      sizeBytes: uploaded.sizeBytes,
+      provider: result.provider,
+      model: result.model,
+    });
+
+    await completeStep(stepId, { sizeBytes: uploaded.sizeBytes });
+    await completeJob(job.id);
+    return null;
+  } catch (err) {
+    const publicMsg = publicErrorMessage(err);
+    await failStep(stepId, publicMsg);
+    await failJob(job.id, publicMsg, err instanceof Error ? (err.stack ?? err.message) : String(err));
+    return publicMsg;
+  }
+}
+
+export async function confirmVisual(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  const session = await auth();
+  if (!session?.user) {
+    redirect("/login");
+  }
+
+  const jobId = String(formData.get("jobId") ?? "");
+  const job = await getOwnedJob(jobId, session.user.id);
+
+  const confirmed = await confirmJob(jobId);
+  if (confirmed.status !== "running") {
+    revalidatePath(`/projects/${job.projectId}`);
+    return { error: "" };
+  }
+
+  const error = await executeVisualJob(confirmed);
+  revalidatePath(`/projects/${job.projectId}`);
+  return { error: error ?? "" };
+}
+
+export async function cancelVisual(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  const session = await auth();
+  if (!session?.user) {
+    redirect("/login");
+  }
+
+  const jobId = String(formData.get("jobId") ?? "");
+  const job = await getOwnedJob(jobId, session.user.id);
+  await cancelJob(jobId);
+  revalidatePath(`/projects/${job.projectId}`);
+  return { error: "" };
+}
+
+export async function retryVisual(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  const session = await auth();
+  if (!session?.user) {
+    redirect("/login");
+  }
+
+  const jobId = String(formData.get("jobId") ?? "");
+  const job = await getOwnedJob(jobId, session.user.id);
+
+  if (!isStalled(job)) {
+    return { error: "This job isn't stalled." };
+  }
+
+  const error = await executeVisualJob(job);
+  revalidatePath(`/projects/${job.projectId}`);
+  return { error: error ?? "" };
+}
+
+export async function getVisualUrl(mediaAssetId: string): Promise<string> {
   const session = await auth();
   if (!session?.user) {
     redirect("/login");

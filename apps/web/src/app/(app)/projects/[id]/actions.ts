@@ -1,13 +1,13 @@
 "use server";
 
-import { and, desc, eq } from "drizzle-orm";
+import { and, asc, desc, eq } from "drizzle-orm";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { auth } from "@/auth";
 import { db } from "@/db";
-import { generationJobs, scenes, scripts } from "@/db/schema";
+import { generationJobs, mediaAssets, scenes, scripts } from "@/db/schema";
 import { loadOwnedProject } from "@/lib/authz";
-import { estimateGenerationCostCents } from "@/lib/cost-estimate";
+import { estimateGenerationCostCents, estimateTTSCostCents } from "@/lib/cost-estimate";
 import {
   cancelJob,
   completeJob,
@@ -21,7 +21,8 @@ import {
   startStep,
   withRetry,
 } from "@/lib/jobs";
-import { scriptProvider, storyboardProvider } from "@/lib/providers";
+import { scriptProvider, storyboardProvider, ttsProvider } from "@/lib/providers";
+import { storageProvider } from "@/lib/storage-instance";
 import { sceneUpdateSchema } from "@/lib/validation";
 
 const STORYBOARD_MODEL = "claude-sonnet-5";
@@ -278,6 +279,168 @@ export async function retryStoryboard(
   const error = await executeStoryboardJob(job);
   revalidatePath(`/projects/${job.projectId}`);
   return { error: error ?? "" };
+}
+
+// --- Voice: request → confirm → run. Combines all scenes' narration into
+// one track — Voice Studio (Section 13) will add per-speaker/multi-voice
+// later; this is the "1 TTS voice" leg of the M1 vertical slice. ---
+
+export async function requestVoice(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  const session = await auth();
+  if (!session?.user) {
+    redirect("/login");
+  }
+
+  const projectId = String(formData.get("projectId") ?? "");
+  const project = await loadOwnedProject(projectId, session.user.id);
+
+  const idempotencyKey = String(formData.get("idempotencyKey") ?? "");
+  if (!idempotencyKey) {
+    return { error: "Missing request key — reload the page and try again." };
+  }
+
+  if (!ttsProvider.isConfigured()) {
+    return {
+      error:
+        "Voice generation isn't connected yet — add ELEVENLABS_API_KEY to your environment and restart the app.",
+    };
+  }
+  if (!storageProvider.isConfigured()) {
+    return {
+      error:
+        "Private storage isn't connected yet — set STORAGE_BUCKET/STORAGE_ACCESS_KEY_ID/STORAGE_SECRET_ACCESS_KEY and restart the app. Generated audio has to land in private storage, not a temporary provider URL.",
+    };
+  }
+
+  const projectScenes = await db
+    .select()
+    .from(scenes)
+    .where(eq(scenes.projectId, project.id))
+    .orderBy(asc(scenes.order));
+
+  if (projectScenes.length === 0) {
+    return { error: "Generate a storyboard first — voice narration is built from the scene list." };
+  }
+
+  const narration = projectScenes.map((s) => s.narration).join("\n\n");
+
+  await requestJob({
+    projectId: project.id,
+    type: "voice",
+    provider: ttsProvider.name,
+    model: null,
+    idempotencyKey,
+    params: { narration },
+    estimatedCostCents: estimateTTSCostCents({
+      provider: ttsProvider.name,
+      characterCount: narration.length,
+    }),
+  });
+
+  revalidatePath(`/projects/${project.id}`);
+  return { error: "" };
+}
+
+async function executeVoiceJob(job: typeof generationJobs.$inferSelect): Promise<string | null> {
+  const stepId = await startStep(job.id, "generate_voice", 0);
+
+  try {
+    const params = job.params as { narration: string };
+    const result = await withRetry(() => ttsProvider.generate({ text: params.narration }));
+
+    const storageKey = `projects/${job.projectId}/voice/${job.id}.mp3`;
+    const uploaded = await storageProvider.putObject({
+      key: storageKey,
+      body: result.audio,
+      contentType: result.contentType,
+    });
+
+    await db.insert(mediaAssets).values({
+      projectId: job.projectId,
+      jobId: job.id,
+      type: "voice_audio",
+      storageKey: uploaded.key,
+      contentType: result.contentType,
+      sizeBytes: uploaded.sizeBytes,
+      provider: result.provider,
+      model: result.model,
+      metadata: { characterCount: result.characterCount },
+    });
+
+    await completeStep(stepId, { characterCount: result.characterCount, sizeBytes: uploaded.sizeBytes });
+    await completeJob(job.id);
+    return null;
+  } catch (err) {
+    const publicMsg = publicErrorMessage(err);
+    await failStep(stepId, publicMsg);
+    await failJob(job.id, publicMsg, err instanceof Error ? (err.stack ?? err.message) : String(err));
+    return publicMsg;
+  }
+}
+
+export async function confirmVoice(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  const session = await auth();
+  if (!session?.user) {
+    redirect("/login");
+  }
+
+  const jobId = String(formData.get("jobId") ?? "");
+  const job = await getOwnedJob(jobId, session.user.id);
+
+  const confirmed = await confirmJob(jobId);
+  if (confirmed.status !== "running") {
+    revalidatePath(`/projects/${job.projectId}`);
+    return { error: "" };
+  }
+
+  const error = await executeVoiceJob(confirmed);
+  revalidatePath(`/projects/${job.projectId}`);
+  return { error: error ?? "" };
+}
+
+export async function cancelVoice(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  const session = await auth();
+  if (!session?.user) {
+    redirect("/login");
+  }
+
+  const jobId = String(formData.get("jobId") ?? "");
+  const job = await getOwnedJob(jobId, session.user.id);
+  await cancelJob(jobId);
+  revalidatePath(`/projects/${job.projectId}`);
+  return { error: "" };
+}
+
+export async function retryVoice(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  const session = await auth();
+  if (!session?.user) {
+    redirect("/login");
+  }
+
+  const jobId = String(formData.get("jobId") ?? "");
+  const job = await getOwnedJob(jobId, session.user.id);
+
+  if (!isStalled(job)) {
+    return { error: "This job isn't stalled." };
+  }
+
+  const error = await executeVoiceJob(job);
+  revalidatePath(`/projects/${job.projectId}`);
+  return { error: error ?? "" };
+}
+
+export async function getVoicePlaybackUrl(mediaAssetId: string): Promise<string> {
+  const session = await auth();
+  if (!session?.user) {
+    redirect("/login");
+  }
+
+  const [asset] = await db.select().from(mediaAssets).where(eq(mediaAssets.id, mediaAssetId)).limit(1);
+  if (!asset) {
+    throw new Error("Media asset not found.");
+  }
+  await loadOwnedProject(asset.projectId, session.user.id);
+  return storageProvider.getSignedUrl(asset.storageKey);
 }
 
 // --- Scene editing ---

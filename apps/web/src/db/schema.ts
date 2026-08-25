@@ -191,6 +191,25 @@ export const usageCosts = pgTable("usage_cost", {
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
+// Generated/uploaded media, copied into private object storage (never left
+// at a temporary provider URL) and accessed only via short-lived signed
+// URLs — see storage.ts / s3-storage-provider.ts.
+export const mediaAssets = pgTable("media_asset", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  projectId: uuid("project_id")
+    .notNull()
+    .references(() => projects.id, { onDelete: "cascade" }),
+  jobId: uuid("job_id").references(() => generationJobs.id, { onDelete: "set null" }),
+  type: text("type").notNull(),
+  storageKey: text("storage_key").notNull(),
+  contentType: text("content_type").notNull(),
+  sizeBytes: integer("size_bytes").notNull(),
+  provider: text("provider"),
+  model: text("model"),
+  metadata: jsonb("metadata"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
 export const auditEvents = pgTable("audit_event", {
   id: uuid("id").primaryKey().defaultRandom(),
   userId: text("user_id").references(() => users.id, {

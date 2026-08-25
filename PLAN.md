@@ -48,10 +48,19 @@ using it is just risk with no benefit.
   calls.
 - **M1 — Vertical slice** *(in progress)*: idea → script → scene breakdown →
   1 TTS voice → 1 AI image/video scene → assembled export → downloadable
-  package. **Idea → script** and **script → scene breakdown** legs are done,
-  both via adapter interfaces (`ScriptProvider`/`AnthropicScriptProvider`,
-  `StoryboardProvider`/`AnthropicStoryboardProvider`, Section 18-style —
-  swapping providers later won't touch product code). Not yet built: TTS,
+  package. **Idea → script**, **script → scene breakdown**, and **scenes →
+  voice** legs are done, all via adapter interfaces
+  (`ScriptProvider`/`AnthropicScriptProvider`,
+  `StoryboardProvider`/`AnthropicStoryboardProvider`,
+  `TTSProvider`/`ElevenLabsTTSProvider`, Section 18-style — swapping
+  providers later won't touch product code) and all gated by the M1.5 cost
+  gate and job resilience machinery. Voice generation combines every scene's
+  narration into one track (Voice Studio's multi-speaker/per-character
+  assignment is Section 13 scope, not this slice) and requires private
+  object storage to be configured first — generated audio is copied into
+  R2/S3 via a `StorageProvider`/`S3StorageProvider` adapter and only ever
+  served back through short-lived signed URLs, never a temporary provider
+  link, per Section 19. New `media_asset` table tracks it. Not yet built:
   image/video generation, export.
 - **M1.5 — Job resilience, cost gate, scene breakdown** *(done)*: closed two
   structural gaps from M1 before more (and more expensive) generation types

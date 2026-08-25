@@ -2,23 +2,29 @@ import { asc, desc, eq } from "drizzle-orm";
 import { notFound } from "next/navigation";
 import { auth } from "@/auth";
 import { db } from "@/db";
-import { generationJobs, scenes, scripts, usageCosts } from "@/db/schema";
+import { generationJobs, mediaAssets, scenes, scripts, usageCosts } from "@/db/schema";
 import { isStalled } from "@/lib/jobs";
-import { storyboardProvider } from "@/lib/providers";
+import { storyboardProvider, ttsProvider } from "@/lib/providers";
+import { storageProvider } from "@/lib/storage-instance";
 import { loadOwnedProject } from "@/lib/authz";
 import {
   cancelScript,
   cancelStoryboard,
+  cancelVoice,
   confirmScript,
   confirmStoryboard,
+  confirmVoice,
+  getVoicePlaybackUrl,
   moveScene,
   requestStoryboard,
   retryScript,
   retryStoryboard,
+  retryVoice,
   updateScene,
 } from "./actions";
 import { JobConfirmCard, StalledJobCard } from "./job-cards";
 import { GenerateStoryboardForm, SceneEditForm } from "./scene-form";
+import { GenerateVoiceForm } from "./voice-form";
 
 export default async function ProjectDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -55,6 +61,7 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
 
   const scriptJob = jobs.find((job) => job.type === "script");
   const storyboardJob = jobs.find((job) => job.type === "storyboard");
+  const voiceJob = jobs.find((job) => job.type === "voice");
 
   const [scriptCost] = scriptJob
     ? await db.select().from(usageCosts).where(eq(usageCosts.jobId, scriptJob.id)).limit(1)
@@ -62,6 +69,18 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
   const [storyboardCost] = storyboardJob
     ? await db.select().from(usageCosts).where(eq(usageCosts.jobId, storyboardJob.id)).limit(1)
     : [];
+  const [voiceCost] = voiceJob
+    ? await db.select().from(usageCosts).where(eq(usageCosts.jobId, voiceJob.id)).limit(1)
+    : [];
+
+  const [voiceAsset] = voiceJob
+    ? await db
+        .select()
+        .from(mediaAssets)
+        .where(eq(mediaAssets.jobId, voiceJob.id))
+        .limit(1)
+    : [];
+  const voicePlaybackUrl = voiceAsset ? await getVoicePlaybackUrl(voiceAsset.id) : null;
 
   return (
     <div className="flex max-w-2xl flex-col gap-8">
@@ -198,6 +217,61 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
       </section>
 
       <section className="flex flex-col gap-3">
+        <h2 className="text-sm font-medium text-muted">Voice</h2>
+
+        {voiceJob?.status === "awaiting_confirmation" && voiceCost && (
+          <JobConfirmCard
+            jobId={voiceJob.id}
+            estimatedCostCents={voiceCost.estimatedCostCents}
+            provider={voiceJob.provider}
+            model={voiceJob.model}
+            label="voice generation"
+            confirmAction={confirmVoice}
+            cancelAction={cancelVoice}
+          />
+        )}
+        {voiceJob?.status === "running" && isStalled(voiceJob) && (
+          <StalledJobCard jobId={voiceJob.id} label="Voice generation" retryAction={retryVoice} />
+        )}
+        {voiceJob?.status === "failed" && (
+          <p className="rounded-lg border border-dashed border-red-400/40 p-6 text-sm text-red-400">
+            Voice generation failed: {voiceJob.error}
+          </p>
+        )}
+
+        {voicePlaybackUrl ? (
+          <div className="rounded-lg border border-border bg-surface p-4">
+            <audio controls src={voicePlaybackUrl} className="w-full" />
+            <p className="mt-2 text-xs text-muted">
+              {voiceAsset?.provider} · {(voiceAsset?.metadata as { characterCount?: number } | null)?.characterCount ?? "?"} characters
+            </p>
+          </div>
+        ) : (
+          (!voiceJob || voiceJob.status === "failed" || voiceJob.status === "cancelled") && (
+            <div className="flex flex-col gap-3 rounded-lg border border-dashed border-border p-6">
+              <p className="text-sm text-muted">
+                {voiceJob
+                  ? "Try again — this creates a new generation request."
+                  : "No voice track yet. This narrates the full scene list as one audio file."}
+              </p>
+              <GenerateVoiceForm
+                projectId={project.id}
+                disabledReason={
+                  projectScenes.length === 0
+                    ? "Generate a storyboard first — voice narration is built from the scene list."
+                    : !ttsProvider.isConfigured()
+                      ? "Voice generation isn't connected yet — add ELEVENLABS_API_KEY to your environment and restart the app."
+                      : !storageProvider.isConfigured()
+                        ? "Private storage isn't connected yet — set STORAGE_BUCKET/STORAGE_ACCESS_KEY_ID/STORAGE_SECRET_ACCESS_KEY and restart the app."
+                        : null
+                }
+              />
+            </div>
+          )
+        )}
+      </section>
+
+      <section className="flex flex-col gap-3">
         <h2 className="text-sm font-medium text-muted">Generation jobs</h2>
         <ul className="flex flex-col gap-2">
           {jobs.map((job) => (
@@ -228,8 +302,8 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
       </section>
 
       <p className="text-xs text-muted">
-        Voice, visuals, and export aren&apos;t wired up yet — this page shows what Create Video and
-        the storyboard step have produced so far.
+        Visuals and export aren&apos;t wired up yet — this page shows what Create Video, the
+        storyboard step, and voice generation have produced so far.
       </p>
     </div>
   );

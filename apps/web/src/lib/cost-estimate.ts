@@ -42,3 +42,18 @@ export function estimateGenerationCostCents(input: {
     estimatedOutputTokens,
   };
 }
+
+// Approximate — verify against elevenlabs.io/pricing before trusting this
+// for real spend decisions.
+const TTS_PRICE_CENTS_PER_1K_CHARS: Record<string, number> = {
+  elevenlabs: 18,
+};
+
+export function estimateTTSCostCents(input: { provider: string; characterCount: number }): number {
+  const pricePerThousand = TTS_PRICE_CENTS_PER_1K_CHARS[input.provider];
+  if (pricePerThousand === undefined) {
+    throw new Error(`No price table entry for TTS provider "${input.provider}" — add one before estimating cost.`);
+  }
+
+  return Math.max(1, Math.ceil((input.characterCount / 1000) * pricePerThousand));
+}

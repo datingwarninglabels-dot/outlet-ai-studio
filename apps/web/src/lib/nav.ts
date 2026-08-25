@@ -11,7 +11,7 @@ export const NAV_ITEMS: NavItem[] = [
   { label: "Create Video", href: "/create-video", status: "live" },
   { label: "Projects", href: "/projects", status: "live" },
   { label: "Character Library", href: "/characters", status: "live" },
-  { label: "World Library", href: "/worlds", status: "planned" },
+  { label: "World Library", href: "/worlds", status: "live" },
   { label: "Voice Studio", href: "/voice-studio", status: "planned" },
   { label: "Thumbnail Studio", href: "/thumbnail-studio", status: "planned" },
   { label: "Media Library", href: "/media-library", status: "planned" },

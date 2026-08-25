@@ -134,12 +134,13 @@ export const scenes = pgTable("scene", {
 
 export const generationJobs = pgTable("generation_job", {
   id: uuid("id").primaryKey().defaultRandom(),
-  // Exactly one of projectId/characterId is set, enforced in code (not a DB
-  // constraint) — most jobs belong to a project; Character Library jobs
-  // (character sheets, consistency tests) belong to a character instead,
-  // since characters are reusable across projects and don't have one.
+  // Exactly one of projectId/characterId/worldId is set, enforced in code
+  // (not a DB constraint) — most jobs belong to a project; Character/World
+  // Library jobs (sheets, consistency tests) belong to that entity instead,
+  // since both are reusable across projects and don't have one.
   projectId: uuid("project_id").references(() => projects.id, { onDelete: "cascade" }),
   characterId: uuid("character_id").references(() => characters.id, { onDelete: "cascade" }),
+  worldId: uuid("world_id").references(() => worlds.id, { onDelete: "cascade" }),
   type: text("type").notNull(),
   provider: text("provider").notNull(),
   model: text("model"),
@@ -185,6 +186,7 @@ export const usageCosts = pgTable("usage_cost", {
     .unique(),
   projectId: uuid("project_id").references(() => projects.id, { onDelete: "cascade" }),
   characterId: uuid("character_id").references(() => characters.id, { onDelete: "cascade" }),
+  worldId: uuid("world_id").references(() => worlds.id, { onDelete: "cascade" }),
   provider: text("provider").notNull(),
   estimatedCostCents: integer("estimated_cost_cents").notNull(),
   confirmedAt: timestamp("confirmed_at"),
@@ -286,6 +288,63 @@ export const characterReferences = pgTable("character_reference", {
   approved: boolean("approved").notNull().default(false),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
+
+// Reusable across projects (Section 11) — a Project Bible location/setting,
+// not scoped to one project, only to the Owner. These fields are "locked"
+// the same way character appearance fields are, referenced when building
+// generation prompts and later checked by the Continuity Checker.
+export const worlds = pgTable("world", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  ownerId: text("owner_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  name: text("name").notNull(),
+  description: text("description").notNull(),
+  locationDescription: text("location_description"),
+  propsVehicles: text("props_vehicles"),
+  outfitsAccessories: text("outfits_accessories"),
+  lightingPalette: text("lighting_palette"),
+  cameraStyle: text("camera_style"),
+  animationStyle: text("animation_style"),
+  timeOfDay: text("time_of_day"),
+  weather: text("weather"),
+  negativePrompt: text("negative_prompt"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+export const worldReferences = pgTable("world_reference", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  worldId: uuid("world_id")
+    .notNull()
+    .references(() => worlds.id, { onDelete: "cascade" }),
+  mediaAssetId: uuid("media_asset_id")
+    .notNull()
+    .references(() => mediaAssets.id, { onDelete: "cascade" }),
+  jobId: uuid("job_id").references(() => generationJobs.id, { onDelete: "set null" }),
+  // "uploaded" | "establishing" | "detail" | "consistency_test"
+  viewType: text("view_type").notNull(),
+  source: text("source").notNull(), // "upload" | "generated"
+  approved: boolean("approved").notNull().default(false),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+// Which characters typically appear in this world — Section 11's "character
+// and voice assignments" (voice comes along for free via character.assignedVoiceId,
+// no separate field needed here). Pure join, no extra columns yet.
+export const worldCharacters = pgTable(
+  "world_character",
+  {
+    worldId: uuid("world_id")
+      .notNull()
+      .references(() => worlds.id, { onDelete: "cascade" }),
+    characterId: uuid("character_id")
+      .notNull()
+      .references(() => characters.id, { onDelete: "cascade" }),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (wc) => [primaryKey({ columns: [wc.worldId, wc.characterId] })],
+);
 
 export const auditEvents = pgTable("audit_event", {
   id: uuid("id").primaryKey().defaultRandom(),

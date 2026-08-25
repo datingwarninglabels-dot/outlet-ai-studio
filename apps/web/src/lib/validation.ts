@@ -88,3 +88,21 @@ export const characterSchema = z
     message: "Real-person characters require documented permission notes.",
     path: ["permissionNotes"],
   });
+
+export const worldSchema = z.object({
+  name: z.string().min(1).max(100),
+  description: z.string().min(1).max(1000),
+  locationDescription: optionalField,
+  propsVehicles: optionalField,
+  outfitsAccessories: optionalField,
+  lightingPalette: optionalField,
+  cameraStyle: optionalField,
+  animationStyle: optionalField,
+  timeOfDay: optionalField,
+  weather: optionalField,
+  negativePrompt: z
+    .string()
+    .max(500)
+    .optional()
+    .transform((v) => (v?.trim() ? v.trim() : null)),
+});

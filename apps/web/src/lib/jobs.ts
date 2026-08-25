@@ -22,13 +22,18 @@ export async function requestJob(
     idempotencyKey: string;
     params: unknown;
     estimatedCostCents: number;
-  } & ({ projectId: string; characterId?: undefined } | { characterId: string; projectId?: undefined }),
+  } & (
+    | { projectId: string; characterId?: undefined; worldId?: undefined }
+    | { characterId: string; projectId?: undefined; worldId?: undefined }
+    | { worldId: string; projectId?: undefined; characterId?: undefined }
+  ),
 ) {
   const inserted = await db
     .insert(generationJobs)
     .values({
       projectId: input.projectId ?? null,
       characterId: input.characterId ?? null,
+      worldId: input.worldId ?? null,
       type: input.type,
       provider: input.provider,
       model: input.model,
@@ -56,6 +61,7 @@ export async function requestJob(
       jobId: job.id,
       projectId: input.projectId ?? null,
       characterId: input.characterId ?? null,
+      worldId: input.worldId ?? null,
       provider: input.provider,
       estimatedCostCents: input.estimatedCostCents,
     });

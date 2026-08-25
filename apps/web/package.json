@@ -4,6 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "trigger:dev": "npx trigger.dev@latest dev",
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
@@ -17,6 +18,7 @@
     "@auth/drizzle-adapter": "^1.11.3",
     "@aws-sdk/client-s3": "^3.1117.0",
     "@aws-sdk/s3-request-presigner": "^3.1117.0",
+    "@trigger.dev/sdk": "^4.5.12",
     "bcryptjs": "^3.0.3",
     "drizzle-orm": "^0.45.2",
     "jszip": "^3.10.1",

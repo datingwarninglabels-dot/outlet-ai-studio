@@ -4,19 +4,28 @@ Source spec: [docs/master-prompt.md](./docs/master-prompt.md).
 
 ## Stack
 
-- **Frontend:** Next.js (App Router) + TypeScript + Tailwind + shadcn/ui
-  primitives (restyled, original branding). PWA via manifest + service
-  worker (added when the app is otherwise stable — M8).
-- **Backend:** Next.js server actions/API routes for CRUD. A **separate
-  worker process** (Node + BullMQ + Redis) for rendering/export jobs,
-  introduced in M1 when real generation jobs exist — not before, to avoid
-  standing up infrastructure with nothing to run on it yet.
-- **Database:** PostgreSQL (Supabase or Neon) + Drizzle ORM.
+- **Frontend:** Next.js (App Router) + TypeScript + Tailwind, original
+  branding/interface (no third-party component library). PWA via manifest
+  + service worker — done, M6.
+- **Backend:** Next.js server actions/API routes for CRUD. Generation jobs
+  run as **Trigger.dev tasks** (`apps/web/src/trigger/`), not in-process
+  and not on a self-hosted worker — see the Phase 2 Milestone 1 section
+  below for why and how this replaced the earlier BullMQ/Redis plan this
+  section used to describe (that approach was never built; M1.5
+  deliberately kept execution in-process for Phase 1, and Phase 2
+  Milestone 1 replaced "in-process" with Trigger.dev directly, skipping a
+  self-hosted queue entirely).
+- **Database:** PostgreSQL (provider-agnostic — Neon, Supabase, or local —
+  accessed only via `postgres`/Drizzle, no Supabase SDK) + Drizzle ORM.
 - **Object storage:** Cloudflare R2 or S3 — private buckets, signed URLs.
 - **Auth:** Auth.js (NextAuth v5) — email/password + Google OAuth, TOTP
-  scaffolding for future-mandatory 2FA.
-- **Secrets:** encrypted at rest, server-only key, never returned in full to
-  the client.
+  scaffolding for future-mandatory 2FA. Single-Owner bootstrap only until
+  Phase 2 adds real customer accounts.
+- **Secrets:** server-only, never returned in full to the client. Provider
+  credentials are environment-variable-only today (Provider Hub is M2's
+  scoped-down v1 — see that section) — "encrypted at rest" storage of
+  Owner-entered credentials was the original plan for a later pass, not
+  yet built.
 
 ## Provider choices (initial)
 
@@ -435,13 +444,97 @@ using it is just risk with no benefit.
     actual install, toggling airplane mode, concurrent /setup requests)
     once there's a real deployment.
 
+## Phase 2 — customer accounts, billing, and a controlled launch
+
+Phase 1 (M0–M6 above) built a single-Owner private tool. Phase 2 turns it
+into a paid, multi-tenant product — customer accounts, subscription
+billing, an AI credit ledger, per-user authorization, public/policy pages,
+and a production launch checklist. This is a foundation change, not an
+add-on: authorization, deployment, and the data model all get revisited
+under a different threat model than "exactly one Owner, ever."
+
+Before writing any Phase 2 code, a full repository audit and milestone
+plan was published (readiness audit, decisions needed, proposed order) —
+see the project's own memory/session record for that report if revisiting
+this later; the short version is captured in the milestones below.
+
+- **Milestone 1 — background job architecture** *(done)*: the audit's top
+  blocker. Every generation job previously ran synchronously inside the
+  server action that confirmed it, including internal polling loops that
+  can legitimately run 6–20+ minutes (a Shotstack assembly render alone
+  polls for ~6 minutes per attempt, retried up to 3 times; a multi-scene
+  animation batch calls Runway sequentially, each with its own multi-
+  minute poll). That was a deliberate M1.5-era choice for a single-user
+  tool with no deployment pressure — flatly incompatible with Vercel's
+  (or any serverless host's) function time limits, and unacceptable once
+  a paying customer's job could silently time out.
+  - Chose **Trigger.dev** (a managed durable-execution service) over
+    hand-rolling a second worker deployment (Railway/Fly/Render + a
+    queue). Reasoning: it's built specifically for long-running jobs
+    triggered from Next.js, keeps the whole app on Vercel, and avoids
+    operating a second server/queue/deploy-pipeline for a project with
+    no dedicated ops team. This was a call made without a prior explicit
+    user decision on the specific service (only that *some* solution was
+    needed) — flagged as such rather than silently assumed.
+  - All nine job executors (script, storyboard, voice, visual, animation,
+    assembly, thumbnail, character-images, world-images) moved from their
+    `actions.ts` files into `apps/web/src/trigger/*.ts`, each wrapped by a
+    shared `defineJobTask()` helper (`src/trigger/lib/job-task.ts`).
+    `confirmXJob`/`retryXJob` actions now call `xJobTask.trigger({jobId})`
+    instead of awaiting the executor inline — a near-instant enqueue, not
+    a blocking call. Existing UI (JobConfirmCard, StalledJobCard,
+    JobNotifications) needed no changes: it already polls this app's own
+    `generation_jobs`/`job_steps` rows, which the task still writes to
+    exactly as the in-process code did — only *where* the work executes
+    changed, not the job/step/cost-gate model itself.
+  - Trigger.dev's own automatic retry is deliberately off
+    (`retry: { maxAttempts: 1 }`) — this app's job model already has its
+    own resumable-per-step retry (job_steps + StalledJobCard), driven by
+    an explicit Owner click. Layering automatic retry on top would mean a
+    transient failure silently re-runs the whole job from a fresh task
+    before the Owner ever sees it failed.
+  - **Real architecture bug caught before it shipped**: the first attempt
+    had `src/trigger/*.ts` files importing the executor function directly
+    from each `actions.ts` file, with `actions.ts` importing the task
+    object back — a circular dependency. Next.js's build didn't
+    necessarily forbid it outright, but it's fragile and the wrong
+    dependency direction. Fixed by moving each executor's actual
+    definition into its trigger task file and having `actions.ts` import
+    *only* the task object — a strict one-directional dependency
+    (`actions.ts` → `trigger/*.ts`, never the reverse). Confirmed via a
+    clean `npm run build` with no bundler warnings.
+  - Idempotency: `confirm*` actions pass the job's own
+    `idempotencyKey` (already used for double-submit protection at the DB
+    layer) as Trigger.dev's `idempotencyKey` too, so a double-click on
+    "Confirm & generate" can't enqueue two concurrent task runs for the
+    same job. `retry*` actions deliberately don't reuse that key — a
+    retry should genuinely start a fresh attempt, not be deduplicated
+    against the original (stalled) trigger.
+  - Verified: `npm run build` (TypeScript strict, zero errors, no
+    circular-import warnings), `npm run lint`, and `npm test` (74/74),
+    all clean. **Not live-tested** — this needs a real Trigger.dev account
+    (sign-up + project + API key), which wasn't created here; see
+    `README.md`'s updated setup steps. No job has actually executed as a
+    Trigger.dev task in this environment.
+  - Deliberately not done in this milestone: no new DB column tracks the
+    Trigger.dev run id (the existing `job_steps`-based progress model was
+    sufficient without one); no attempt to verify actual behavior under
+    concurrent triggers, task timeouts, or Trigger.dev-side failures
+    beyond what the code review above covers.
+
+Remaining Phase 2 milestones (customer auth/roles, authorization re-audit,
+entitlements/credit ledger, Stripe, public/policy pages, cost/abuse
+controls, monitoring/ops docs, full test matrix, launch checklist) are not
+yet started.
+
 ## Credentials needed (not all at once — per milestone)
 
 Anthropic API key · ElevenLabs API key · Runway API key (image + video) ·
 Shotstack API key (assembly) · Pexels API key · Postgres connection · R2 or
-S3 keys · Google OAuth client ID/secret · hosting (Vercel for web — no
-separate worker/Redis needed for M1, since generation stays in-process and
-video rendering is delegated to Shotstack rather than self-hosted).
+S3 keys · Google OAuth client ID/secret · Trigger.dev secret key + project
+ref (Phase 2 Milestone 1 — required for any generation job to run at all
+now) · hosting (Vercel for web; job execution is delegated to Trigger.dev
+rather than run in-process or on a self-hosted worker).
 
 None of these are needed to run M0 beyond Postgres and Google OAuth — see
 the root `README.md` for setup steps.

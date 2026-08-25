@@ -1,30 +1,19 @@
 "use server";
 
-import { asc, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { auth } from "@/auth";
 import { db } from "@/db";
-import { generationJobs, mediaAssets, projects, scenes, thumbnails } from "@/db/schema";
+import { generationJobs, mediaAssets, thumbnails } from "@/db/schema";
 import { loadOwnedProject } from "@/lib/authz";
 import { estimateImageCostCents } from "@/lib/cost-estimate";
-import {
-  cancelJob,
-  completeJob,
-  completeStep,
-  confirmJob,
-  failJob,
-  failStep,
-  isStalled,
-  publicErrorMessage,
-  requestJob,
-  startStep,
-  withRetry,
-} from "@/lib/jobs";
+import { cancelJob, confirmJob, isStalled, requestJob } from "@/lib/jobs";
 import { imageProvider, thumbnailRatioForPlatform } from "@/lib/providers";
 import { storageProvider } from "@/lib/storage-instance";
 import { overlayHeadline } from "@/lib/thumbnail-overlay";
 import { THUMBNAIL_STYLES, thumbnailTextSchema } from "@/lib/validation";
+import { thumbnailJobTask } from "@/trigger/thumbnail";
 
 type ActionState = { error: string };
 
@@ -48,13 +37,6 @@ async function getOwnedJob(jobId: string, userId: string): Promise<ProjectJob> {
   const projectJob = asProjectJob(job);
   await loadOwnedProject(projectJob.projectId, userId);
   return projectJob;
-}
-
-function buildPrompt(projectTitle: string, sceneVisual: string | null, styleModifier: string): string {
-  const subject = sceneVisual
-    ? `${projectTitle} — ${sceneVisual}`
-    : projectTitle;
-  return `Thumbnail/cover image for a short-form video. Subject: ${subject}. Style: ${styleModifier}. Leave the lower third relatively uncluttered for text to be added afterward. No text or lettering in the image itself.`;
 }
 
 export async function requestThumbnails(_prev: ActionState, formData: FormData): Promise<ActionState> {
@@ -106,114 +88,6 @@ export async function requestThumbnails(_prev: ActionState, formData: FormData):
   return { error: "" };
 }
 
-async function executeThumbnailJob(job: ProjectJob): Promise<string | null> {
-  const params = job.params as { styles: string[]; platform: string };
-
-  const doneStyles = new Set(
-    (await db.select({ style: thumbnails.style }).from(thumbnails).where(eq(thumbnails.jobId, job.id))).map(
-      (t) => t.style,
-    ),
-  );
-
-  const [firstScene] = await db
-    .select()
-    .from(scenes)
-    .where(eq(scenes.projectId, job.projectId))
-    .orderBy(asc(scenes.order))
-    .limit(1);
-  const [projectRow] = await db.select().from(projects).where(eq(projects.id, job.projectId)).limit(1);
-  const projectTitle = projectRow?.title ?? "Untitled";
-  const sceneVisual = firstScene?.visualDescription ?? null;
-
-  const { ratio, width, height } = thumbnailRatioForPlatform(params.platform);
-
-  for (let i = 0; i < params.styles.length; i++) {
-    const styleKey = params.styles[i];
-    if (doneStyles.has(styleKey)) {
-      continue;
-    }
-
-    const stepId = await startStep(job.id, `generate_thumbnail_${styleKey}`, i);
-
-    const styleDef = THUMBNAIL_STYLES.find((s) => s.key === styleKey);
-    if (!styleDef) {
-      const msg = `Unknown thumbnail style "${styleKey}".`;
-      await failStep(stepId, msg);
-      await failJob(job.id, msg, msg);
-      return msg;
-    }
-
-    try {
-      const prompt = buildPrompt(projectTitle, sceneVisual, styleDef.promptModifier);
-      const result = await withRetry(() => imageProvider.generate({ prompt, ratio }));
-
-      const baseExtension = result.contentType.includes("png") ? "png" : "jpg";
-      const baseKey = `projects/${job.projectId}/thumbnails/${job.id}-${styleKey}-base.${baseExtension}`;
-      const baseUploaded = await storageProvider.putObject({
-        key: baseKey,
-        body: result.image,
-        contentType: result.contentType,
-      });
-
-      const [baseAsset] = await db
-        .insert(mediaAssets)
-        .values({
-          projectId: job.projectId,
-          jobId: job.id,
-          type: "thumbnail_base",
-          storageKey: baseUploaded.key,
-          contentType: result.contentType,
-          sizeBytes: baseUploaded.sizeBytes,
-          provider: result.provider,
-          model: result.model,
-        })
-        .returning();
-
-      const composited = await overlayHeadline(result.image, projectTitle, width, height);
-      const compositedKey = `projects/${job.projectId}/thumbnails/${job.id}-${styleKey}-composited.png`;
-      const compositedUploaded = await storageProvider.putObject({
-        key: compositedKey,
-        body: composited,
-        contentType: "image/png",
-      });
-
-      const [compositedAsset] = await db
-        .insert(mediaAssets)
-        .values({
-          projectId: job.projectId,
-          jobId: job.id,
-          type: "thumbnail_composited",
-          storageKey: compositedUploaded.key,
-          contentType: "image/png",
-          sizeBytes: compositedUploaded.sizeBytes,
-          provider: result.provider,
-          model: result.model,
-        })
-        .returning();
-
-      await db.insert(thumbnails).values({
-        projectId: job.projectId,
-        jobId: job.id,
-        platform: params.platform,
-        style: styleKey,
-        headlineText: projectTitle,
-        baseAssetId: baseAsset.id,
-        compositedAssetId: compositedAsset.id,
-      });
-
-      await completeStep(stepId, { sizeBytes: baseUploaded.sizeBytes });
-    } catch (err) {
-      const publicMsg = publicErrorMessage(err);
-      await failStep(stepId, publicMsg);
-      await failJob(job.id, publicMsg, err instanceof Error ? (err.stack ?? err.message) : String(err));
-      return publicMsg;
-    }
-  }
-
-  await completeJob(job.id);
-  return null;
-}
-
 export async function confirmThumbnails(_prev: ActionState, formData: FormData): Promise<ActionState> {
   const session = await auth();
   if (!session?.user) {
@@ -229,9 +103,9 @@ export async function confirmThumbnails(_prev: ActionState, formData: FormData):
     return { error: "" };
   }
 
-  const error = await executeThumbnailJob(asProjectJob(confirmed));
+  await thumbnailJobTask.trigger({ jobId: confirmed.id }, { idempotencyKey: confirmed.idempotencyKey });
   revalidatePath(`/projects/${job.projectId}`);
-  return { error: error ?? "" };
+  return { error: "" };
 }
 
 export async function cancelThumbnails(_prev: ActionState, formData: FormData): Promise<ActionState> {
@@ -260,9 +134,9 @@ export async function retryThumbnails(_prev: ActionState, formData: FormData): P
     return { error: "This job isn't stalled." };
   }
 
-  const error = await executeThumbnailJob(job);
+  await thumbnailJobTask.trigger({ jobId: job.id });
   revalidatePath(`/projects/${job.projectId}`);
-  return { error: error ?? "" };
+  return { error: "" };
 }
 
 /** Free — re-composites the existing base image with new text, no provider call. */

@@ -5,22 +5,9 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { auth } from "@/auth";
 import { db } from "@/db";
-import {
-  brandKits,
-  characterReferences,
-  characters,
-  continuityChecks,
-  generationJobs,
-  mediaAssets,
-  projects,
-  scenes,
-  scripts,
-  worldReferences,
-  worlds,
-} from "@/db/schema";
+import { brandKits, continuityChecks, generationJobs, mediaAssets, projects, scenes, scripts } from "@/db/schema";
 import { loadOwnedCharacter, loadOwnedProject, loadOwnedWorld } from "@/lib/authz";
-import { characterAppearanceSummary } from "@/lib/character-prompt";
-import { isContinuityCheckerConfigured, runContinuityCheck } from "@/lib/continuity-checker";
+import { isContinuityCheckerConfigured } from "@/lib/continuity-checker";
 import {
   estimateAssemblyCostCents,
   estimateContinuityCheckCostCents,
@@ -29,35 +16,24 @@ import {
   estimateTTSCostCents,
   estimateVideoCostCents,
 } from "@/lib/cost-estimate";
-import {
-  cancelJob,
-  completeJob,
-  completeStep,
-  confirmJob,
-  failJob,
-  failStep,
-  getStepOutput,
-  isStalled,
-  publicErrorMessage,
-  requestJob,
-  startStep,
-  updateStepOutput,
-  withRetry,
-} from "@/lib/jobs";
+import { cancelJob, confirmJob, isStalled, requestJob } from "@/lib/jobs";
 import {
   assemblyProvider,
   imageProvider,
   ratioForPlatform,
-  scriptProvider,
   shotstackAspectRatioForPlatform,
   storyboardProvider,
   ttsProvider,
   videoProvider,
 } from "@/lib/providers";
-import type { AssemblyCaption, AssemblyClip } from "@/lib/providers";
 import { storageProvider } from "@/lib/storage-instance";
 import { projectOverridesSchema, sceneUpdateSchema } from "@/lib/validation";
-import { worldSettingSummary } from "@/lib/world-prompt";
+import { animationJobTask } from "@/trigger/animation";
+import { assemblyJobTask } from "@/trigger/assembly";
+import { scriptJobTask } from "@/trigger/script";
+import { storyboardJobTask } from "@/trigger/storyboard";
+import { visualJobTask } from "@/trigger/visual";
+import { voiceJobTask } from "@/trigger/voice";
 
 const STORYBOARD_MODEL = "claude-sonnet-5";
 
@@ -80,7 +56,7 @@ type ActionState = { error: string };
 // ever deals with project-scoped jobs, so narrow to a non-null projectId
 // once, right where a job enters this file's functions, rather than
 // re-deriving it at every job.projectId use site.
-type ProjectJob = typeof generationJobs.$inferSelect & { projectId: string };
+export type ProjectJob = typeof generationJobs.$inferSelect & { projectId: string };
 
 function asProjectJob(job: typeof generationJobs.$inferSelect): ProjectJob {
   if (!job.projectId) {
@@ -103,37 +79,6 @@ async function getOwnedJob(jobId: string, userId: string): Promise<ProjectJob> {
 // estimate) happens in create-video/actions.ts since that's also where the
 // project itself is created; the Owner confirms here, on the project page. ---
 
-async function executeScriptJob(job: ProjectJob): Promise<string | null> {
-  const stepId = await startStep(job.id, "generate_script", 0);
-
-  try {
-    const params = job.params as { idea: string; platform: string; mode: "quick" | "guided" | "studio" };
-    const result = await withRetry(() => scriptProvider.generate(params));
-
-    await db.insert(scripts).values({
-      projectId: job.projectId,
-      content: result.content,
-      provider: result.provider,
-      model: result.model,
-      promptTokens: result.promptTokens,
-      completionTokens: result.completionTokens,
-      status: "draft",
-    });
-
-    await completeStep(stepId, {
-      promptTokens: result.promptTokens,
-      completionTokens: result.completionTokens,
-    });
-    await completeJob(job.id);
-    return null;
-  } catch (err) {
-    const publicMsg = publicErrorMessage(err);
-    await failStep(stepId, publicMsg);
-    await failJob(job.id, publicMsg, err instanceof Error ? (err.stack ?? err.message) : String(err));
-    return publicMsg;
-  }
-}
-
 export async function confirmScript(_prev: ActionState, formData: FormData): Promise<ActionState> {
   const session = await auth();
   if (!session?.user) {
@@ -149,9 +94,9 @@ export async function confirmScript(_prev: ActionState, formData: FormData): Pro
     return { error: "" };
   }
 
-  const error = await executeScriptJob(asProjectJob(confirmed));
+  await scriptJobTask.trigger({ jobId: confirmed.id }, { idempotencyKey: confirmed.idempotencyKey });
   revalidatePath(`/projects/${job.projectId}`);
-  return { error: error ?? "" };
+  return { error: "" };
 }
 
 export async function cancelScript(_prev: ActionState, formData: FormData): Promise<ActionState> {
@@ -180,9 +125,9 @@ export async function retryScript(_prev: ActionState, formData: FormData): Promi
     return { error: "This job isn't stalled." };
   }
 
-  const error = await executeScriptJob(job);
+  await scriptJobTask.trigger({ jobId: job.id });
   revalidatePath(`/projects/${job.projectId}`);
-  return { error: error ?? "" };
+  return { error: "" };
 }
 
 // --- Storyboard: request → confirm → run, mirroring the script leg ---
@@ -242,59 +187,6 @@ export async function requestStoryboard(
   return { error: "" };
 }
 
-async function executeStoryboardJob(job: ProjectJob): Promise<string | null> {
-  const stepId = await startStep(job.id, "generate_storyboard", 0);
-
-  try {
-    const params = job.params as { scriptId: string; platform: string };
-    const [script] = await db.select().from(scripts).where(eq(scripts.id, params.scriptId)).limit(1);
-    if (!script) {
-      throw new Error("Source script no longer exists.");
-    }
-
-    const result = await withRetry(() =>
-      storyboardProvider.generate({ script: script.content, platform: params.platform }),
-    );
-
-    // Storyboard generation isn't resumable per-scene like Visual/Animation
-    // — "try again" always means a fresh attempt (existing UI copy already
-    // says so). Clear any scene list from a previous storyboard job on this
-    // project first, so regenerating (e.g. after a truncated response,
-    // M4) replaces it instead of appending a duplicate batch. Downstream
-    // media assets aren't deleted — they just lose their scene reference
-    // (media_asset.scene_id is "set null" on delete), which is the correct
-    // outcome for a deliberate regenerate.
-    await db.delete(scenes).where(eq(scenes.projectId, job.projectId));
-
-    await db.insert(scenes).values(
-      result.scenes.map((scene, index) => ({
-        projectId: job.projectId,
-        order: index,
-        narration: scene.narration,
-        visualDescription: scene.visualDescription,
-        audioDirection: scene.audioDirection,
-        durationSeconds: scene.durationSeconds,
-        status: "draft" as const,
-        provider: result.provider,
-        model: result.model,
-      })),
-    );
-
-    // truncated=true (M4): the model's response hit its output ceiling
-    // mid-array and this is a recovered partial list, not the full
-    // breakdown — never silently drop that context, the Owner needs to know
-    // to regenerate rather than assume the scene list is complete.
-    await completeStep(stepId, { sceneCount: result.scenes.length, truncated: result.truncated });
-    await completeJob(job.id);
-    return null;
-  } catch (err) {
-    const publicMsg = publicErrorMessage(err);
-    await failStep(stepId, publicMsg);
-    await failJob(job.id, publicMsg, err instanceof Error ? (err.stack ?? err.message) : String(err));
-    return publicMsg;
-  }
-}
-
 export async function confirmStoryboard(
   _prev: ActionState,
   formData: FormData,
@@ -313,9 +205,9 @@ export async function confirmStoryboard(
     return { error: "" };
   }
 
-  const error = await executeStoryboardJob(asProjectJob(confirmed));
+  await storyboardJobTask.trigger({ jobId: confirmed.id }, { idempotencyKey: confirmed.idempotencyKey });
   revalidatePath(`/projects/${job.projectId}`);
-  return { error: error ?? "" };
+  return { error: "" };
 }
 
 export async function cancelStoryboard(
@@ -350,9 +242,9 @@ export async function retryStoryboard(
     return { error: "This job isn't stalled." };
   }
 
-  const error = await executeStoryboardJob(job);
+  await storyboardJobTask.trigger({ jobId: job.id });
   revalidatePath(`/projects/${job.projectId}`);
-  return { error: error ?? "" };
+  return { error: "" };
 }
 
 // --- Voice: request → confirm → run. Combines all scenes' narration into
@@ -422,43 +314,6 @@ export async function requestVoice(_prev: ActionState, formData: FormData): Prom
   return { error: "" };
 }
 
-async function executeVoiceJob(job: ProjectJob): Promise<string | null> {
-  const stepId = await startStep(job.id, "generate_voice", 0);
-
-  try {
-    const params = job.params as { narration: string; voiceId?: string };
-    const result = await withRetry(() => ttsProvider.generate({ text: params.narration, voiceId: params.voiceId }));
-
-    const storageKey = `projects/${job.projectId}/voice/${job.id}.mp3`;
-    const uploaded = await storageProvider.putObject({
-      key: storageKey,
-      body: result.audio,
-      contentType: result.contentType,
-    });
-
-    await db.insert(mediaAssets).values({
-      projectId: job.projectId,
-      jobId: job.id,
-      type: "voice_audio",
-      storageKey: uploaded.key,
-      contentType: result.contentType,
-      sizeBytes: uploaded.sizeBytes,
-      provider: result.provider,
-      model: result.model,
-      metadata: { characterCount: result.characterCount },
-    });
-
-    await completeStep(stepId, { characterCount: result.characterCount, sizeBytes: uploaded.sizeBytes });
-    await completeJob(job.id);
-    return null;
-  } catch (err) {
-    const publicMsg = publicErrorMessage(err);
-    await failStep(stepId, publicMsg);
-    await failJob(job.id, publicMsg, err instanceof Error ? (err.stack ?? err.message) : String(err));
-    return publicMsg;
-  }
-}
-
 export async function confirmVoice(_prev: ActionState, formData: FormData): Promise<ActionState> {
   const session = await auth();
   if (!session?.user) {
@@ -474,9 +329,9 @@ export async function confirmVoice(_prev: ActionState, formData: FormData): Prom
     return { error: "" };
   }
 
-  const error = await executeVoiceJob(asProjectJob(confirmed));
+  await voiceJobTask.trigger({ jobId: confirmed.id }, { idempotencyKey: confirmed.idempotencyKey });
   revalidatePath(`/projects/${job.projectId}`);
-  return { error: error ?? "" };
+  return { error: "" };
 }
 
 export async function cancelVoice(_prev: ActionState, formData: FormData): Promise<ActionState> {
@@ -505,9 +360,9 @@ export async function retryVoice(_prev: ActionState, formData: FormData): Promis
     return { error: "This job isn't stalled." };
   }
 
-  const error = await executeVoiceJob(job);
+  await voiceJobTask.trigger({ jobId: job.id });
   revalidatePath(`/projects/${job.projectId}`);
-  return { error: error ?? "" };
+  return { error: "" };
 }
 
 export async function getVoicePlaybackUrl(mediaAssetId: string): Promise<string> {
@@ -615,161 +470,6 @@ export async function requestVisual(_prev: ActionState, formData: FormData): Pro
  * partway through a batch doesn't lose completed scenes or re-charge for
  * them.
  */
-async function executeVisualJob(job: ProjectJob): Promise<string | null> {
-  const params = job.params as { sceneIds: string[]; ratio: string };
-
-  const doneAssets = await db
-    .select({ sceneId: mediaAssets.sceneId })
-    .from(mediaAssets)
-    .where(and(eq(mediaAssets.jobId, job.id), eq(mediaAssets.type, "scene_image")));
-  const doneSceneIds = new Set(doneAssets.map((a) => a.sceneId));
-
-  // Section 17: Brand Kit's defaultVisualStyle auto-applies to every scene
-  // unless this project set its own visualStyleOverride. Resolved once per
-  // batch, not per scene — it doesn't vary scene to scene.
-  const [projectRow] = await db.select().from(projects).where(eq(projects.id, job.projectId)).limit(1);
-  const [brandKit] = projectRow
-    ? await db.select().from(brandKits).where(eq(brandKits.ownerId, projectRow.ownerId)).limit(1)
-    : [];
-  const effectiveVisualStyle = projectRow?.visualStyleOverride ?? brandKit?.defaultVisualStyle ?? null;
-
-  for (let i = 0; i < params.sceneIds.length; i++) {
-    const sceneId = params.sceneIds[i];
-    if (doneSceneIds.has(sceneId)) {
-      continue;
-    }
-
-    const stepId = await startStep(job.id, `generate_visual_scene_${i}`, i);
-
-    const [scene] = await db.select().from(scenes).where(eq(scenes.id, sceneId)).limit(1);
-    if (!scene) {
-      const msg = "A scene was deleted before its visual could be generated.";
-      await failStep(stepId, msg);
-      await failJob(job.id, msg, msg);
-      return msg;
-    }
-
-    try {
-      const [character, world] = await Promise.all([
-        scene.characterId
-          ? db.select().from(characters).where(eq(characters.id, scene.characterId)).limit(1).then((r) => r[0])
-          : Promise.resolve(undefined),
-        scene.worldId
-          ? db.select().from(worlds).where(eq(worlds.id, scene.worldId)).limit(1).then((r) => r[0])
-          : Promise.resolve(undefined),
-      ]);
-
-      const lockedDetailsParts = [
-        character && `Character in scene (must match exactly): ${characterAppearanceSummary(character)}`,
-        world && `Setting (must match exactly): ${worldSettingSummary(world)}`,
-      ].filter((p): p is string => Boolean(p));
-
-      const promptParts = [
-        scene.visualDescription,
-        ...lockedDetailsParts,
-        effectiveVisualStyle && `Visual style: ${effectiveVisualStyle}`,
-      ].filter((p): p is string => Boolean(p));
-      const prompt = `${promptParts.join(". ")}.`;
-
-      const referenceImages: { uri: string; tag: string }[] = [];
-      if (character) {
-        const [approvedCharRef] = await db
-          .select({ asset: mediaAssets })
-          .from(characterReferences)
-          .innerJoin(mediaAssets, eq(characterReferences.mediaAssetId, mediaAssets.id))
-          .where(and(eq(characterReferences.characterId, character.id), eq(characterReferences.approved, true)))
-          .limit(1);
-        if (approvedCharRef) {
-          referenceImages.push({
-            uri: await storageProvider.getSignedUrl(approvedCharRef.asset.storageKey, 600),
-            tag: "IDENTITY",
-          });
-        }
-      }
-      if (world) {
-        const [approvedWorldRef] = await db
-          .select({ asset: mediaAssets })
-          .from(worldReferences)
-          .innerJoin(mediaAssets, eq(worldReferences.mediaAssetId, mediaAssets.id))
-          .where(and(eq(worldReferences.worldId, world.id), eq(worldReferences.approved, true)))
-          .limit(1);
-        if (approvedWorldRef) {
-          referenceImages.push({
-            uri: await storageProvider.getSignedUrl(approvedWorldRef.asset.storageKey, 600),
-            tag: "SETTING",
-          });
-        }
-      }
-
-      const result = await withRetry(() =>
-        imageProvider.generate({
-          prompt,
-          ratio: params.ratio,
-          referenceImages: referenceImages.length ? referenceImages : undefined,
-        }),
-      );
-
-      const extension = result.contentType.includes("png") ? "png" : "jpg";
-      const storageKey = `projects/${job.projectId}/scenes/${sceneId}/visual-${job.id}.${extension}`;
-      const uploaded = await storageProvider.putObject({
-        key: storageKey,
-        body: result.image,
-        contentType: result.contentType,
-      });
-
-      const [asset] = await db
-        .insert(mediaAssets)
-        .values({
-          projectId: job.projectId,
-          jobId: job.id,
-          sceneId,
-          type: "scene_image",
-          storageKey: uploaded.key,
-          contentType: result.contentType,
-          sizeBytes: uploaded.sizeBytes,
-          provider: result.provider,
-          model: result.model,
-        })
-        .returning();
-
-      // Continuity Checker (Section 11): best-effort QA, never lets a
-      // failed/misconfigured check invalidate a successfully generated
-      // visual — the image generation above already succeeded and was paid
-      // for either way.
-      if (lockedDetailsParts.length > 0) {
-        try {
-          const checkResult = await runContinuityCheck({
-            imageBytes: result.image,
-            contentType: result.contentType,
-            lockedDetails: lockedDetailsParts.join("\n"),
-          });
-          await db.insert(continuityChecks).values({
-            sceneId,
-            mediaAssetId: asset.id,
-            characterId: character?.id ?? null,
-            worldId: world?.id ?? null,
-            warnings: checkResult.warnings,
-            provider: checkResult.provider,
-            model: checkResult.model,
-          });
-        } catch {
-          // Not configured, or the provider call failed — skip silently.
-        }
-      }
-
-      await completeStep(stepId, { sizeBytes: uploaded.sizeBytes });
-    } catch (err) {
-      const publicMsg = publicErrorMessage(err);
-      await failStep(stepId, publicMsg);
-      await failJob(job.id, publicMsg, err instanceof Error ? (err.stack ?? err.message) : String(err));
-      return publicMsg;
-    }
-  }
-
-  await completeJob(job.id);
-  return null;
-}
-
 export async function confirmVisual(_prev: ActionState, formData: FormData): Promise<ActionState> {
   const session = await auth();
   if (!session?.user) {
@@ -785,9 +485,9 @@ export async function confirmVisual(_prev: ActionState, formData: FormData): Pro
     return { error: "" };
   }
 
-  const error = await executeVisualJob(asProjectJob(confirmed));
+  await visualJobTask.trigger({ jobId: confirmed.id }, { idempotencyKey: confirmed.idempotencyKey });
   revalidatePath(`/projects/${job.projectId}`);
-  return { error: error ?? "" };
+  return { error: "" };
 }
 
 export async function cancelVisual(_prev: ActionState, formData: FormData): Promise<ActionState> {
@@ -816,9 +516,9 @@ export async function retryVisual(_prev: ActionState, formData: FormData): Promi
     return { error: "This job isn't stalled." };
   }
 
-  const error = await executeVisualJob(job);
+  await visualJobTask.trigger({ jobId: job.id });
   revalidatePath(`/projects/${job.projectId}`);
-  return { error: error ?? "" };
+  return { error: "" };
 }
 
 export async function getVisualUrl(mediaAssetId: string): Promise<string> {
@@ -919,84 +619,6 @@ export async function requestAnimation(_prev: ActionState, formData: FormData): 
   return { error: "" };
 }
 
-async function executeAnimationJob(job: ProjectJob): Promise<string | null> {
-  const params = job.params as { sceneIds: string[]; ratio: string };
-
-  const doneAssets = await db
-    .select({ sceneId: mediaAssets.sceneId })
-    .from(mediaAssets)
-    .where(and(eq(mediaAssets.jobId, job.id), eq(mediaAssets.type, "scene_video")));
-  const doneSceneIds = new Set(doneAssets.map((a) => a.sceneId));
-
-  for (let i = 0; i < params.sceneIds.length; i++) {
-    const sceneId = params.sceneIds[i];
-    if (doneSceneIds.has(sceneId)) {
-      continue;
-    }
-
-    const stepId = await startStep(job.id, `animate_scene_${i}`, i);
-
-    const [scene] = await db.select().from(scenes).where(eq(scenes.id, sceneId)).limit(1);
-    const [imageAsset] = await db
-      .select()
-      .from(mediaAssets)
-      .where(and(eq(mediaAssets.sceneId, sceneId), eq(mediaAssets.type, "scene_image")))
-      .orderBy(desc(mediaAssets.createdAt))
-      .limit(1);
-
-    if (!scene || !imageAsset) {
-      const msg = "This scene's source image is missing — generate a visual for it first.";
-      await failStep(stepId, msg);
-      await failJob(job.id, msg, msg);
-      return msg;
-    }
-
-    try {
-      const imageUrl = await storageProvider.getSignedUrl(imageAsset.storageKey, 600);
-      const durationSeconds = pickVideoDuration(scene.durationSeconds);
-      const result = await withRetry(() =>
-        videoProvider.generate({
-          imageUrl,
-          prompt: scene.visualDescription,
-          ratio: params.ratio,
-          durationSeconds,
-        }),
-      );
-
-      const extension = result.contentType.includes("mp4") ? "mp4" : "mov";
-      const storageKey = `projects/${job.projectId}/scenes/${sceneId}/animation-${job.id}.${extension}`;
-      const uploaded = await storageProvider.putObject({
-        key: storageKey,
-        body: result.video,
-        contentType: result.contentType,
-      });
-
-      await db.insert(mediaAssets).values({
-        projectId: job.projectId,
-        jobId: job.id,
-        sceneId,
-        type: "scene_video",
-        storageKey: uploaded.key,
-        contentType: result.contentType,
-        sizeBytes: uploaded.sizeBytes,
-        provider: result.provider,
-        model: result.model,
-        metadata: { durationSeconds },
-      });
-
-      await completeStep(stepId, { sizeBytes: uploaded.sizeBytes, durationSeconds });
-    } catch (err) {
-      const publicMsg = publicErrorMessage(err);
-      await failStep(stepId, publicMsg);
-      await failJob(job.id, publicMsg, err instanceof Error ? (err.stack ?? err.message) : String(err));
-      return publicMsg;
-    }
-  }
-
-  await completeJob(job.id);
-  return null;
-}
-
 export async function confirmAnimation(_prev: ActionState, formData: FormData): Promise<ActionState> {
   const session = await auth();
   if (!session?.user) {
@@ -1012,9 +634,9 @@ export async function confirmAnimation(_prev: ActionState, formData: FormData): 
     return { error: "" };
   }
 
-  const error = await executeAnimationJob(asProjectJob(confirmed));
+  await animationJobTask.trigger({ jobId: confirmed.id }, { idempotencyKey: confirmed.idempotencyKey });
   revalidatePath(`/projects/${job.projectId}`);
-  return { error: error ?? "" };
+  return { error: "" };
 }
 
 export async function cancelAnimation(_prev: ActionState, formData: FormData): Promise<ActionState> {
@@ -1043,9 +665,9 @@ export async function retryAnimation(_prev: ActionState, formData: FormData): Pr
     return { error: "This job isn't stalled." };
   }
 
-  const error = await executeAnimationJob(job);
+  await animationJobTask.trigger({ jobId: job.id });
   revalidatePath(`/projects/${job.projectId}`);
-  return { error: error ?? "" };
+  return { error: "" };
 }
 
 export async function getAnimationUrl(mediaAssetId: string): Promise<string> {
@@ -1150,119 +772,6 @@ export async function requestAssembly(_prev: ActionState, formData: FormData): P
   return { error: "" };
 }
 
-async function executeAssemblyJob(job: ProjectJob): Promise<string | null> {
-  const stepId = await startStep(job.id, "assemble_video", 0);
-
-  try {
-    // M4: a render already submitted by a previous (stalled/crashed) attempt
-    // is resumed by polling the same renderId rather than submitting — and
-    // paying for — a second one. startStep() above never clears a step's
-    // existing output, so this survives across retries of the same job.
-    const existingOutput = (await getStepOutput(stepId)) as
-      | { renderId: string; totalDurationSeconds: number }
-      | null;
-
-    let renderId: string;
-    let totalDurationSeconds: number;
-
-    if (existingOutput?.renderId) {
-      renderId = existingOutput.renderId;
-      totalDurationSeconds = existingOutput.totalDurationSeconds;
-    } else {
-      const params = job.params as { sceneIds: string[]; aspectRatio: "9:16" | "16:9" };
-
-      const [voiceAsset] = await db
-        .select()
-        .from(mediaAssets)
-        .where(and(eq(mediaAssets.projectId, job.projectId), eq(mediaAssets.type, "voice_audio")))
-        .orderBy(desc(mediaAssets.createdAt))
-        .limit(1);
-      if (!voiceAsset) {
-        throw new Error("Voice track no longer exists.");
-      }
-
-      const clips: AssemblyClip[] = [];
-      const captions: AssemblyCaption[] = [];
-      let cursor = 0;
-
-      for (const sceneId of params.sceneIds) {
-        const [scene] = await db.select().from(scenes).where(eq(scenes.id, sceneId)).limit(1);
-        if (!scene) {
-          throw new Error("A scene was deleted before assembly could run.");
-        }
-
-        const [videoAsset] = await db
-          .select()
-          .from(mediaAssets)
-          .where(and(eq(mediaAssets.sceneId, sceneId), eq(mediaAssets.type, "scene_video")))
-          .orderBy(desc(mediaAssets.createdAt))
-          .limit(1);
-
-        const [imageAsset] = videoAsset
-          ? []
-          : await db
-              .select()
-              .from(mediaAssets)
-              .where(and(eq(mediaAssets.sceneId, sceneId), eq(mediaAssets.type, "scene_image")))
-              .orderBy(desc(mediaAssets.createdAt))
-              .limit(1);
-
-        const asset = videoAsset ?? imageAsset;
-        if (!asset) {
-          throw new Error("A scene is missing its visual.");
-        }
-
-        const mediaUrl = await storageProvider.getSignedUrl(asset.storageKey, 1800);
-        const durationSeconds = scene.durationSeconds ?? 5;
-
-        clips.push({ mediaUrl, mediaType: videoAsset ? "video" : "image", durationSeconds });
-        captions.push({ text: scene.narration, startSeconds: cursor, durationSeconds });
-        cursor += durationSeconds;
-      }
-
-      const audioUrl = await storageProvider.getSignedUrl(voiceAsset.storageKey, 1800);
-
-      const submitted = await withRetry(() =>
-        assemblyProvider.submitRender({ clips, audioUrl, captions, aspectRatio: params.aspectRatio }),
-      );
-      renderId = submitted.renderId;
-      totalDurationSeconds = cursor;
-      // Persist before polling — if the poll below stalls or the process
-      // dies, a retry must find this and resume rather than resubmit.
-      await updateStepOutput(stepId, { renderId, totalDurationSeconds });
-    }
-
-    const result = await withRetry(() => assemblyProvider.pollAndDownload(renderId));
-
-    const storageKey = `projects/${job.projectId}/final-${job.id}.mp4`;
-    const uploaded = await storageProvider.putObject({
-      key: storageKey,
-      body: result.video,
-      contentType: result.contentType,
-    });
-
-    await db.insert(mediaAssets).values({
-      projectId: job.projectId,
-      jobId: job.id,
-      type: "final_video",
-      storageKey: uploaded.key,
-      contentType: result.contentType,
-      sizeBytes: uploaded.sizeBytes,
-      provider: result.provider,
-      metadata: { totalDurationSeconds },
-    });
-
-    await completeStep(stepId, { sizeBytes: uploaded.sizeBytes, totalDurationSeconds, renderId });
-    await completeJob(job.id);
-    return null;
-  } catch (err) {
-    const publicMsg = publicErrorMessage(err);
-    await failStep(stepId, publicMsg);
-    await failJob(job.id, publicMsg, err instanceof Error ? (err.stack ?? err.message) : String(err));
-    return publicMsg;
-  }
-}
-
 export async function confirmAssembly(_prev: ActionState, formData: FormData): Promise<ActionState> {
   const session = await auth();
   if (!session?.user) {
@@ -1278,9 +787,9 @@ export async function confirmAssembly(_prev: ActionState, formData: FormData): P
     return { error: "" };
   }
 
-  const error = await executeAssemblyJob(asProjectJob(confirmed));
+  await assemblyJobTask.trigger({ jobId: confirmed.id }, { idempotencyKey: confirmed.idempotencyKey });
   revalidatePath(`/projects/${job.projectId}`);
-  return { error: error ?? "" };
+  return { error: "" };
 }
 
 export async function cancelAssembly(_prev: ActionState, formData: FormData): Promise<ActionState> {
@@ -1309,9 +818,9 @@ export async function retryAssembly(_prev: ActionState, formData: FormData): Pro
     return { error: "This job isn't stalled." };
   }
 
-  const error = await executeAssemblyJob(job);
+  await assemblyJobTask.trigger({ jobId: job.id });
   revalidatePath(`/projects/${job.projectId}`);
-  return { error: error ?? "" };
+  return { error: "" };
 }
 
 export async function getFinalVideoUrl(mediaAssetId: string): Promise<string> {

@@ -373,8 +373,67 @@ using it is just risk with no benefit.
   failed on a Next.js "use server" export rule (a plain constant can't be
   exported from a server-actions file), fixed by moving it to
   `lib/media-categories.ts`. Migration additive. Not live-tested.
-- **M6**: PWA polish, accessibility pass, full test suite (Section 23 of the
-  master prompt), security review.
+- **M6 — PWA polish, accessibility pass, full test suite, security review**
+  *(done)*:
+  - **Unit test suite**: added vitest (`npm test`) — 74 tests covering
+    every pure, deterministic piece of business logic (cost estimators,
+    validation schemas including the real-person permission gate,
+    SRT/VTT caption generation, character/world prompt builders, and the
+    M4 storyboard-truncation-recovery parser, promoted from an ad-hoc
+    scratch script into a real regression test). This is the one category
+    of Section 23's "full test suite" this sandboxed environment can
+    actually execute and verify green — integration tests need a real
+    Postgres connection (blocked here, same limitation noted throughout
+    this project) and E2E/browser tests need a live deployed app with
+    real provider credentials, so those remain unwritten rather than
+    faked.
+  - **Security review**: a dedicated audit pass found and fixed two real
+    issues — a check-then-insert race in the Owner-bootstrap flow
+    (`/setup`) that could let two concurrent first-time submissions both
+    create an account, closed with a Postgres transaction-scoped advisory
+    lock; and several Media Library lookup/mutation actions that trusted
+    a submitted id or project filter without verifying it belonged to the
+    caller (unlike every other `get*Url`/mutation action in the app),
+    closed with a shared `assertAssetReachableByOwner()` check. The audit
+    also flagged "no middleware.ts, so `authConfig`'s `authorized`
+    callback is dead code" — investigated and found to be a false
+    positive: Next.js 16 renamed `middleware.ts` to `proxy.ts`, and
+    `src/proxy.ts` already wires it up correctly. (A first attempt at
+    "fixing" this by adding `middleware.ts` actually broke the build —
+    caught immediately and reverted.) The moderate-severity `npm audit`
+    finding (esbuild, via `drizzle-kit`'s dependency chain) is dev-server-
+    only and the suggested fix force-downgrades `drizzle-kit`, a breaking
+    change not worth taking for a dev-time-only advisory — left as-is,
+    on the record.
+  - **Accessibility pass**: the same audit found labels, focus
+    indicators, keyboard-trap risk, and contrast all already solid, but
+    touch targets were systemically under-sized (`h-8`/`h-9`/`h-10`,
+    32-40px) on nearly every secondary action across 17 files, against
+    Section 2's 44px target — only top-level primary buttons and two nav
+    components consistently met it. Swept to `h-11` (44px) app-wide.
+  - **PWA basics**: installable (manifest + generated placeholder icons —
+    explicitly not final brand design), safe update behavior (a new
+    service worker waits for explicit confirmation before activating,
+    never yanking an in-progress edit out from under the Owner), clear
+    offline states (a live online/offline banner plus a static offline
+    fallback page — deliberately not real offline editing, since every
+    page here is a dynamic, session-specific server render with no safe
+    way to cache the HTML), and job-completion notifications with
+    explicit permission (client-side polling while a job is pending,
+    scoped to the project page). Documented gap: notifications only work
+    while the tab is open — true background push needs a service-worker
+    push subscription plus server-side VAPID infrastructure, not built.
+  - Verified: `npm run build` (TypeScript strict, zero errors across all
+    four slices — caught and fixed a BigInt-literal/ES2017-target error
+    and two React 19 `set-state-in-effect` lint errors along the way),
+    `npm run lint`, and `npm test` (74/74), all clean at every slice. Not
+    live-tested: no live DB has ever been reachable from this sandbox
+    (the standing limitation noted throughout this project), so the
+    advisory-lock race fix, service worker registration/install/offline
+    navigation, and notification delivery are all unverified against a
+    real running app — worth a manual pass (Lighthouse PWA audit, an
+    actual install, toggling airplane mode, concurrent /setup requests)
+    once there's a real deployment.
 
 ## Credentials needed (not all at once — per milestone)
 

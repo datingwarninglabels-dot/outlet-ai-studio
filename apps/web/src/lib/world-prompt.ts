@@ -8,8 +8,12 @@ const VIEW_INSTRUCTIONS: Record<string, string> = {
   consistency_test: "medium establishing shot, neutral framing",
 };
 
-export function buildWorldPrompt(world: World, viewType: string, hasReference: boolean): string {
-  const setting = [
+// Reused both when generating reference-set views and when composing a
+// per-scene visual prompt (Section 11 continuity wiring) — and as the
+// locked-details text the Continuity Checker compares a generated image
+// against, so it stays in sync with whatever the prompt actually asked for.
+export function worldSettingSummary(world: World): string {
+  return [
     world.locationDescription && `location: ${world.locationDescription}`,
     world.propsVehicles && `props/vehicles: ${world.propsVehicles}`,
     world.outfitsAccessories && `typical outfits/accessories: ${world.outfitsAccessories}`,
@@ -21,6 +25,10 @@ export function buildWorldPrompt(world: World, viewType: string, hasReference: b
   ]
     .filter(Boolean)
     .join("; ");
+}
+
+export function buildWorldPrompt(world: World, viewType: string, hasReference: boolean): string {
+  const setting = worldSettingSummary(world);
 
   const referenceNote = hasReference
     ? "Match the location, lighting, and style of the reference image tagged SETTING exactly. "

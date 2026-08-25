@@ -10,8 +10,12 @@ const VIEW_INSTRUCTIONS: Record<string, string> = {
   consistency_test: "front-facing head-and-shoulders portrait, neutral expression",
 };
 
-export function buildCharacterPrompt(character: Character, viewType: string, hasReference: boolean): string {
-  const appearance = [
+// Reused both when generating character-sheet views and when composing a
+// per-scene visual prompt (Section 11 continuity wiring) — and as the
+// locked-details text the Continuity Checker compares a generated image
+// against, so it stays in sync with whatever the prompt actually asked for.
+export function characterAppearanceSummary(character: Character): string {
+  return [
     character.face && `face: ${character.face}`,
     character.skinTone && `skin tone: ${character.skinTone}`,
     character.hair && `hair: ${character.hair}`,
@@ -24,6 +28,10 @@ export function buildCharacterPrompt(character: Character, viewType: string, has
   ]
     .filter(Boolean)
     .join("; ");
+}
+
+export function buildCharacterPrompt(character: Character, viewType: string, hasReference: boolean): string {
+  const appearance = characterAppearanceSummary(character);
 
   const referenceNote = hasReference
     ? "Match the identity, face, and appearance of the person tagged IDENTITY in the reference image exactly. "

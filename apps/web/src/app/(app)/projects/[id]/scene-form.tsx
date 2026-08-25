@@ -45,6 +45,8 @@ export function SceneEditForm({
   sceneCount,
   updateAction,
   moveAction,
+  ownedCharacters,
+  ownedWorlds,
 }: {
   projectId: string;
   scene: {
@@ -56,11 +58,15 @@ export function SceneEditForm({
     provider: string | null;
     model: string | null;
     version: number;
+    characterId: string | null;
+    worldId: string | null;
   };
   index: number;
   sceneCount: number;
   updateAction: typeof updateScene;
   moveAction: typeof moveScene;
+  ownedCharacters: { id: string; name: string }[];
+  ownedWorlds: { id: string; name: string }[];
 }) {
   const [state, formAction, pending] = useActionState(updateAction, initialState);
   const [moveState, moveFormAction, moving] = useActionState(moveAction, initialState);
@@ -164,6 +170,51 @@ export function SceneEditForm({
             className="h-11 w-32 rounded-lg border border-border bg-background px-3 text-sm outline-none focus-visible:border-accent-teal"
           />
         </div>
+
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <div className="flex flex-col gap-1.5">
+            <label htmlFor={`characterId-${scene.id}`} className="text-sm font-medium">
+              Character (optional)
+            </label>
+            <select
+              id={`characterId-${scene.id}`}
+              name="characterId"
+              defaultValue={scene.characterId ?? ""}
+              className="h-11 rounded-lg border border-border bg-background px-3 text-sm outline-none focus-visible:border-accent-teal"
+            >
+              <option value="">None</option>
+              {ownedCharacters.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <label htmlFor={`worldId-${scene.id}`} className="text-sm font-medium">
+              World (optional)
+            </label>
+            <select
+              id={`worldId-${scene.id}`}
+              name="worldId"
+              defaultValue={scene.worldId ?? ""}
+              className="h-11 rounded-lg border border-border bg-background px-3 text-sm outline-none focus-visible:border-accent-teal"
+            >
+              <option value="">None</option>
+              {ownedWorlds.map((w) => (
+                <option key={w.id} value={w.id}>
+                  {w.name}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+        {(scene.characterId || scene.worldId) && (
+          <p className="text-xs text-muted">
+            Visual generation will try to match this assignment&apos;s locked appearance/setting
+            details and run a continuity check after generating.
+          </p>
+        )}
 
         {(state.error || moveState.error) && (
           <p role="alert" className="text-sm text-red-400">

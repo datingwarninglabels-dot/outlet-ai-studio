@@ -26,12 +26,19 @@ export const createVideoSchema = z.object({
   mode: z.enum(["quick", "guided", "studio"]),
 });
 
+const optionalUuid = z
+  .union([z.string().uuid(), z.literal("")])
+  .optional()
+  .transform((v) => (v ? v : null));
+
 export const sceneUpdateSchema = z.object({
   sceneId: z.string().uuid(),
   narration: z.string().min(1).max(4000),
   visualDescription: z.string().min(1).max(2000),
   audioDirection: z.string().max(500),
   durationSeconds: z.coerce.number().int().min(1).max(3600),
+  characterId: optionalUuid,
+  worldId: optionalUuid,
 });
 
 // Section 15's style list. promptModifier is appended to a base prompt

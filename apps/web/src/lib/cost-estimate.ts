@@ -43,6 +43,23 @@ export function estimateGenerationCostCents(input: {
   };
 }
 
+// Approximate, like the text-only estimate above — Claude's image
+// tokenization depends on resolution and isn't verified precisely here.
+// Treats a typical scene-visual image as roughly 1200 input tokens on top
+// of a short locked-details text block, with a short structured-JSON reply.
+// The Continuity Checker call itself is cheap either way (well under a cent
+// most of the time); this exists so Provider Hub's spend view and the
+// Owner's pre-generation estimate both account for it rather than treating
+// it as free.
+export function estimateContinuityCheckCostCents(): number {
+  const price = MODEL_PRICE_CENTS_PER_MTOK["claude-sonnet-5"];
+  const estimatedInputTokens = 1200 + 200;
+  const estimatedOutputTokens = 150;
+  const cents =
+    (estimatedInputTokens / 1_000_000) * price.input + (estimatedOutputTokens / 1_000_000) * price.output;
+  return Math.max(1, Math.ceil(cents));
+}
+
 // Approximate — verify against elevenlabs.io/pricing before trusting this
 // for real spend decisions.
 const TTS_PRICE_CENTS_PER_1K_CHARS: Record<string, number> = {

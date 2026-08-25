@@ -1,12 +1,14 @@
-import { and, asc, desc, eq } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull } from "drizzle-orm";
 import { notFound } from "next/navigation";
 import { auth } from "@/auth";
 import { db } from "@/db";
-import { generationJobs, mediaAssets, scenes, scripts, thumbnails, usageCosts } from "@/db/schema";
+import { continuityChecks, generationJobs, mediaAssets, scenes, scripts, thumbnails, usageCosts } from "@/db/schema";
 import { isStalled } from "@/lib/jobs";
 import { assemblyProvider, imageProvider, storyboardProvider, ttsProvider, videoProvider } from "@/lib/providers";
 import { storageProvider } from "@/lib/storage-instance";
 import { loadOwnedProject } from "@/lib/authz";
+import { listOwnedCharacters } from "../../characters/actions";
+import { listOwnedWorlds } from "../../worlds/actions";
 import {
   cancelAnimation,
   cancelAssembly,
@@ -37,6 +39,7 @@ import {
 import { GenerateAnimationForm } from "./animation-form";
 import { GenerateAssemblyForm } from "./assembly-form";
 import { JobConfirmCard, StalledJobCard } from "@/components/job-cards";
+import { ContinuityWarningsCard } from "./continuity-warnings";
 import { GenerateStoryboardForm, SceneEditForm } from "./scene-form";
 import { cancelThumbnails, confirmThumbnails, getThumbnailImageUrl, retryThumbnails } from "./thumbnail-actions";
 import { GenerateThumbnailsForm, ThumbnailCard } from "./thumbnail-form";
@@ -69,6 +72,11 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
     .from(scenes)
     .where(eq(scenes.projectId, project.id))
     .orderBy(asc(scenes.order));
+
+  const [ownedCharacters, ownedWorlds] = await Promise.all([
+    listOwnedCharacters(session.user.id),
+    listOwnedWorlds(session.user.id),
+  ]);
 
   const jobs = await db
     .select()
@@ -125,6 +133,33 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
     ),
   );
   const scenesRemaining = projectScenes.filter((s) => !visualsBySceneId.has(s.id)).length;
+
+  // Unacknowledged continuity checks with at least one warning, across this
+  // project's scenes — acknowledged checks and clean checks (no warnings)
+  // don't need to show anything. Keyed by scene, most recent first.
+  const openContinuityChecks =
+    projectScenes.length > 0
+      ? await db
+          .select()
+          .from(continuityChecks)
+          .where(
+            and(
+              inArray(
+                continuityChecks.sceneId,
+                projectScenes.map((s) => s.id),
+              ),
+              isNull(continuityChecks.acknowledgedAt),
+            ),
+          )
+          .orderBy(desc(continuityChecks.createdAt))
+      : [];
+  const continuityWarningsBySceneId = new Map<string, { id: string; warnings: { field: string; note: string }[] }>();
+  for (const check of openContinuityChecks) {
+    const warnings = check.warnings as { field: string; note: string }[];
+    if (warnings.length > 0 && !continuityWarningsBySceneId.has(check.sceneId)) {
+      continuityWarningsBySceneId.set(check.sceneId, { id: check.id, warnings });
+    }
+  }
 
   const animationAssets = await db
     .select()
@@ -266,11 +301,15 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
                   provider: scene.provider,
                   model: scene.model,
                   version: scene.version,
+                  characterId: scene.characterId,
+                  worldId: scene.worldId,
                 }}
                 index={index}
                 sceneCount={projectScenes.length}
                 updateAction={updateScene}
                 moveAction={moveScene}
+                ownedCharacters={ownedCharacters.map((c) => ({ id: c.id, name: c.name }))}
+                ownedWorlds={ownedWorlds.map((w) => ({ id: w.id, name: w.name }))}
               />
             ))}
             <p className="text-xs text-muted">
@@ -388,15 +427,19 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
             {projectScenes.map((scene, index) => {
               const visual = visualsBySceneId.get(scene.id);
               if (!visual) return null;
+              const warning = continuityWarningsBySceneId.get(scene.id);
               return (
-                <div key={scene.id} className="rounded-lg border border-border bg-surface p-2">
-                  {/* eslint-disable-next-line @next/next/no-img-element -- signed private-storage URL, not an optimizable static asset */}
-                  <img
-                    src={visual.url}
-                    alt={`Generated visual for scene ${index + 1}`}
-                    className="w-full rounded"
-                  />
-                  <p className="mt-1 text-xs text-muted">Scene {index + 1}</p>
+                <div key={scene.id} className="flex flex-col gap-2">
+                  <div className="rounded-lg border border-border bg-surface p-2">
+                    {/* eslint-disable-next-line @next/next/no-img-element -- signed private-storage URL, not an optimizable static asset */}
+                    <img
+                      src={visual.url}
+                      alt={`Generated visual for scene ${index + 1}`}
+                      className="w-full rounded"
+                    />
+                    <p className="mt-1 text-xs text-muted">Scene {index + 1}</p>
+                  </div>
+                  {warning && <ContinuityWarningsCard checkId={warning.id} warnings={warning.warnings} />}
                 </div>
               );
             })}

@@ -119,6 +119,11 @@ export const scenes = pgTable("scene", {
     .notNull()
     .references(() => projects.id, { onDelete: "cascade" }),
   chapterId: uuid("chapter_id").references(() => chapters.id, { onDelete: "set null" }),
+  // Optional Section 11 wiring: which reusable character/world (if any)
+  // this scene's visual should stay consistent with. "set null" (not
+  // cascade) on delete — losing the assignment shouldn't delete the scene.
+  characterId: uuid("character_id").references(() => characters.id, { onDelete: "set null" }),
+  worldId: uuid("world_id").references(() => worlds.id, { onDelete: "set null" }),
   order: integer("order").notNull().default(0),
   narration: text("narration").notNull(),
   visualDescription: text("visual_description").notNull(),
@@ -345,6 +350,29 @@ export const worldCharacters = pgTable(
   },
   (wc) => [primaryKey({ columns: [wc.worldId, wc.characterId] })],
 );
+
+// Section 11's Continuity Checker: one row per scene visual that was
+// checked against its assigned character/world's locked details.
+// warnings is empty when nothing looked off — the Owner only needs to act
+// on rows with a non-empty list, via acknowledgedAt ("approve an
+// intentional change").
+export const continuityChecks = pgTable("continuity_check", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  sceneId: uuid("scene_id")
+    .notNull()
+    .references(() => scenes.id, { onDelete: "cascade" }),
+  mediaAssetId: uuid("media_asset_id")
+    .notNull()
+    .references(() => mediaAssets.id, { onDelete: "cascade" }),
+  characterId: uuid("character_id").references(() => characters.id, { onDelete: "set null" }),
+  worldId: uuid("world_id").references(() => worlds.id, { onDelete: "set null" }),
+  // [{ field: string, note: string }]
+  warnings: jsonb("warnings").notNull().default([]),
+  provider: text("provider").notNull(),
+  model: text("model").notNull(),
+  acknowledgedAt: timestamp("acknowledged_at"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
 
 export const auditEvents = pgTable("audit_event", {
   id: uuid("id").primaryKey().defaultRandom(),

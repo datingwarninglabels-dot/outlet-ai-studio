@@ -5,10 +5,23 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { auth } from "@/auth";
 import { db } from "@/db";
-import { generationJobs, mediaAssets, scenes, scripts } from "@/db/schema";
-import { loadOwnedProject } from "@/lib/authz";
+import {
+  characterReferences,
+  characters,
+  continuityChecks,
+  generationJobs,
+  mediaAssets,
+  scenes,
+  scripts,
+  worldReferences,
+  worlds,
+} from "@/db/schema";
+import { loadOwnedCharacter, loadOwnedProject, loadOwnedWorld } from "@/lib/authz";
+import { characterAppearanceSummary } from "@/lib/character-prompt";
+import { isContinuityCheckerConfigured, runContinuityCheck } from "@/lib/continuity-checker";
 import {
   estimateAssemblyCostCents,
+  estimateContinuityCheckCostCents,
   estimateGenerationCostCents,
   estimateImageCostCents,
   estimateTTSCostCents,
@@ -40,6 +53,7 @@ import {
 import type { AssemblyCaption, AssemblyClip } from "@/lib/providers";
 import { storageProvider } from "@/lib/storage-instance";
 import { sceneUpdateSchema } from "@/lib/validation";
+import { worldSettingSummary } from "@/lib/world-prompt";
 
 const STORYBOARD_MODEL = "claude-sonnet-5";
 const ASSUMED_STORYBOARD_OUTPUT_TOKENS = 1500;
@@ -529,6 +543,18 @@ export async function requestVisual(_prev: ActionState, formData: FormData): Pro
     return { error: "Every scene already has a visual." };
   }
 
+  // Scenes with an assigned character/world get a Continuity Checker pass
+  // (Section 11) bundled into the same confirmation — one estimate covering
+  // everything that will actually run, rather than a second confirm step.
+  const continuityCheckerAvailable = isContinuityCheckerConfigured();
+  const estimatedCostCents = scenesNeeded.reduce((sum, s) => {
+    let cost = estimateImageCostCents(imageProvider.name);
+    if (continuityCheckerAvailable && (s.characterId || s.worldId)) {
+      cost += estimateContinuityCheckCostCents();
+    }
+    return sum + cost;
+  }, 0);
+
   await requestJob({
     projectId: project.id,
     type: "visual",
@@ -539,7 +565,7 @@ export async function requestVisual(_prev: ActionState, formData: FormData): Pro
       sceneIds: scenesNeeded.map((s) => s.id),
       ratio: ratioForPlatform(project.platform ?? "Custom Project"),
     },
-    estimatedCostCents: scenesNeeded.length * estimateImageCostCents(imageProvider.name),
+    estimatedCostCents,
   });
 
   revalidatePath(`/projects/${project.id}`);
@@ -579,8 +605,60 @@ async function executeVisualJob(job: ProjectJob): Promise<string | null> {
     }
 
     try {
+      const [character, world] = await Promise.all([
+        scene.characterId
+          ? db.select().from(characters).where(eq(characters.id, scene.characterId)).limit(1).then((r) => r[0])
+          : Promise.resolve(undefined),
+        scene.worldId
+          ? db.select().from(worlds).where(eq(worlds.id, scene.worldId)).limit(1).then((r) => r[0])
+          : Promise.resolve(undefined),
+      ]);
+
+      const lockedDetailsParts = [
+        character && `Character in scene (must match exactly): ${characterAppearanceSummary(character)}`,
+        world && `Setting (must match exactly): ${worldSettingSummary(world)}`,
+      ].filter((p): p is string => Boolean(p));
+
+      const prompt = lockedDetailsParts.length
+        ? `${scene.visualDescription}. ${lockedDetailsParts.join(". ")}.`
+        : scene.visualDescription;
+
+      const referenceImages: { uri: string; tag: string }[] = [];
+      if (character) {
+        const [approvedCharRef] = await db
+          .select({ asset: mediaAssets })
+          .from(characterReferences)
+          .innerJoin(mediaAssets, eq(characterReferences.mediaAssetId, mediaAssets.id))
+          .where(and(eq(characterReferences.characterId, character.id), eq(characterReferences.approved, true)))
+          .limit(1);
+        if (approvedCharRef) {
+          referenceImages.push({
+            uri: await storageProvider.getSignedUrl(approvedCharRef.asset.storageKey, 600),
+            tag: "IDENTITY",
+          });
+        }
+      }
+      if (world) {
+        const [approvedWorldRef] = await db
+          .select({ asset: mediaAssets })
+          .from(worldReferences)
+          .innerJoin(mediaAssets, eq(worldReferences.mediaAssetId, mediaAssets.id))
+          .where(and(eq(worldReferences.worldId, world.id), eq(worldReferences.approved, true)))
+          .limit(1);
+        if (approvedWorldRef) {
+          referenceImages.push({
+            uri: await storageProvider.getSignedUrl(approvedWorldRef.asset.storageKey, 600),
+            tag: "SETTING",
+          });
+        }
+      }
+
       const result = await withRetry(() =>
-        imageProvider.generate({ prompt: scene.visualDescription, ratio: params.ratio }),
+        imageProvider.generate({
+          prompt,
+          ratio: params.ratio,
+          referenceImages: referenceImages.length ? referenceImages : undefined,
+        }),
       );
 
       const extension = result.contentType.includes("png") ? "png" : "jpg";
@@ -591,17 +669,45 @@ async function executeVisualJob(job: ProjectJob): Promise<string | null> {
         contentType: result.contentType,
       });
 
-      await db.insert(mediaAssets).values({
-        projectId: job.projectId,
-        jobId: job.id,
-        sceneId,
-        type: "scene_image",
-        storageKey: uploaded.key,
-        contentType: result.contentType,
-        sizeBytes: uploaded.sizeBytes,
-        provider: result.provider,
-        model: result.model,
-      });
+      const [asset] = await db
+        .insert(mediaAssets)
+        .values({
+          projectId: job.projectId,
+          jobId: job.id,
+          sceneId,
+          type: "scene_image",
+          storageKey: uploaded.key,
+          contentType: result.contentType,
+          sizeBytes: uploaded.sizeBytes,
+          provider: result.provider,
+          model: result.model,
+        })
+        .returning();
+
+      // Continuity Checker (Section 11): best-effort QA, never lets a
+      // failed/misconfigured check invalidate a successfully generated
+      // visual — the image generation above already succeeded and was paid
+      // for either way.
+      if (lockedDetailsParts.length > 0) {
+        try {
+          const checkResult = await runContinuityCheck({
+            imageBytes: result.image,
+            contentType: result.contentType,
+            lockedDetails: lockedDetailsParts.join("\n"),
+          });
+          await db.insert(continuityChecks).values({
+            sceneId,
+            mediaAssetId: asset.id,
+            characterId: character?.id ?? null,
+            worldId: world?.id ?? null,
+            warnings: checkResult.warnings,
+            provider: checkResult.provider,
+            model: checkResult.model,
+          });
+        } catch {
+          // Not configured, or the provider call failed — skip silently.
+        }
+      }
 
       await completeStep(stepId, { sizeBytes: uploaded.sizeBytes });
     } catch (err) {
@@ -1168,6 +1274,8 @@ export async function updateScene(_prev: ActionState, formData: FormData): Promi
     visualDescription: formData.get("visualDescription"),
     audioDirection: formData.get("audioDirection"),
     durationSeconds: formData.get("durationSeconds"),
+    characterId: formData.get("characterId"),
+    worldId: formData.get("worldId"),
   });
 
   if (!parsed.success) {
@@ -1186,6 +1294,24 @@ export async function updateScene(_prev: ActionState, formData: FormData): Promi
     return { error: "Scene not found." };
   }
 
+  // Ownership check on the assigned character/world, not just format —
+  // these ids come from a <select> populated by the Owner's own list, but
+  // never trust a submitted id without re-verifying who owns it.
+  if (parsed.data.characterId) {
+    try {
+      await loadOwnedCharacter(parsed.data.characterId, session.user.id);
+    } catch {
+      return { error: "That character wasn't found." };
+    }
+  }
+  if (parsed.data.worldId) {
+    try {
+      await loadOwnedWorld(parsed.data.worldId, session.user.id);
+    } catch {
+      return { error: "That world wasn't found." };
+    }
+  }
+
   await db
     .update(scenes)
     .set({
@@ -1193,6 +1319,8 @@ export async function updateScene(_prev: ActionState, formData: FormData): Promi
       visualDescription: parsed.data.visualDescription,
       audioDirection: parsed.data.audioDirection,
       durationSeconds: parsed.data.durationSeconds,
+      characterId: parsed.data.characterId,
+      worldId: parsed.data.worldId,
       version: scene.version + 1,
       updatedAt: new Date(),
     })
@@ -1200,6 +1328,28 @@ export async function updateScene(_prev: ActionState, formData: FormData): Promi
 
   revalidatePath(`/projects/${project.id}`);
   return { error: "" };
+}
+
+export async function acknowledgeContinuityCheck(formData: FormData): Promise<void> {
+  const session = await auth();
+  if (!session?.user) {
+    redirect("/login");
+  }
+
+  const checkId = String(formData.get("checkId") ?? "");
+  const [check] = await db.select().from(continuityChecks).where(eq(continuityChecks.id, checkId)).limit(1);
+  if (!check) {
+    return;
+  }
+
+  const [scene] = await db.select().from(scenes).where(eq(scenes.id, check.sceneId)).limit(1);
+  if (!scene) {
+    return;
+  }
+  const project = await loadOwnedProject(scene.projectId, session.user.id);
+
+  await db.update(continuityChecks).set({ acknowledgedAt: new Date() }).where(eq(continuityChecks.id, checkId));
+  revalidatePath(`/projects/${project.id}`);
 }
 
 export async function moveScene(_prev: ActionState, formData: FormData): Promise<ActionState> {

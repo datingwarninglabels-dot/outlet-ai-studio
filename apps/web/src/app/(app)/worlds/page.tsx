@@ -17,8 +17,9 @@ export default async function WorldsPage() {
         <h1 className="text-2xl font-semibold">World Library</h1>
         <p className="mt-1 text-sm text-muted">
           Reusable settings with locked location, lighting, camera, and style details — upload or
-          generate reference images, approve them, and assign the characters who appear here. Not
-          yet wired into scene/visual generation — that&apos;s a separate integration.
+          generate reference images, approve them, and assign the characters who appear here. Assign
+          a world to a scene on its project page to keep visuals consistent and get continuity
+          warnings if a generated image drifts from the locked details.
         </p>
       </div>
 

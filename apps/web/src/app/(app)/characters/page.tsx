@@ -15,8 +15,9 @@ export default async function CharactersPage() {
         <h1 className="text-2xl font-semibold">Character Library</h1>
         <p className="mt-1 text-sm text-muted">
           Reusable characters with locked appearance details — upload or generate reference images,
-          approve them, then run a cheap consistency test before a full character sheet. Not yet wired
-          into scene/visual generation — that&apos;s a separate integration.
+          approve them, then run a cheap consistency test before a full character sheet. Assign a
+          character to a scene on its project page to keep visuals consistent and get continuity
+          warnings if a generated image drifts from the locked details.
         </p>
       </div>
 

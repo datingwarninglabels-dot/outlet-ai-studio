@@ -199,6 +199,35 @@ using it is just risk with no benefit.
     actions (7+ files). Given that blast radius, it's worth its own focused
     pass rather than folding into this one silently under the same feature
     name.
+  - **Character Library** *(v1 done — M2 complete, all three areas shipped)*:
+    reusable characters with locked appearance fields (face, skin tone,
+    hair, body type, apparent age, distinguishing details, default
+    clothing, accessories, palette, negative prompt) plus an assigned
+    voice ID for future TTS integration. Reference images can be uploaded
+    or generated as a 4-view sheet (front/side/close-up/full-body) via
+    Runway's `referenceImages` parameter once at least one reference is
+    approved, for stronger identity consistency; a cheap single-image
+    consistency test exists to sanity-check a locked appearance before
+    spending on a full sheet. Real-person characters require permission
+    notes before saving (zod `.refine` cross-field validation) — this app
+    targets faceless/AI content, so a real person's likeness needs an
+    explicit, recorded justification, not a silent default. Same
+    cost-confirmation gate and resumable-per-view job pattern as every
+    other generation leg. Required making `generation_jobs`/`usage_costs`/
+    `media_assets.projectId` nullable so jobs/costs/media can belong to
+    EITHER a project OR a character (`characterId` added alongside,
+    exactly one set, enforced in code not a DB constraint) — caught and
+    fixed a design bug before it ever touched a real database, where an
+    early draft reused `generation_jobs.projectId` to hold a character's
+    UUID, which would have thrown a foreign-key violation at runtime.
+    Verified via `npm run build` (TypeScript strict, zero errors) and
+    `npm run lint`, both clean; not live-tested against a real database
+    (sandbox blocks raw TCP to Postgres in this environment) — migrations
+    hand-reviewed as additive/nullable-only. Not done: characters aren't
+    yet wired into scene/visual generation (a separate integration to
+    pull character references into per-scene image prompts); Provider
+    Hub's spend rollup still joins `usage_costs` to `projects` only, so
+    character-scoped spend doesn't appear there yet.
 - **M3**: World Library + Continuity Checker.
 - **M4**: Long-form resilience — resumable/retryable/idempotent scene-by-
   scene rendering at higher scene counts than tested so far.

@@ -8,10 +8,12 @@ import type {
 
 const MODEL = "claude-sonnet-5";
 
-const SYSTEM_PROMPT = `You break a short-form video script into a scene list for production.
+const SYSTEM_PROMPT = `You break a video script into a scene list for production.
 
-Read the whole script and split it into as many scenes as the pacing naturally calls for (usually
-2-8 for short-form content) — each scene is one continuous shot or visual beat. For each scene give:
+Read the whole script and split it into as many scenes as the pacing naturally calls for — each scene
+is one continuous shot or visual beat. Short-form scripts usually need only 2-8 scenes; long-form
+scripts should get proportionally more (roughly one scene per 15-25 seconds of narration) — do not
+artificially cap the count or merge beats together just to keep the list short. For each scene give:
 narration (the script's voiceover line for that beat, verbatim or lightly trimmed for pacing), a
 concrete visual description suitable as an image/video generation prompt (concrete subject, setting,
 camera framing, lighting — no vague language), audio direction (music mood, sound effects, or pacing
@@ -26,38 +28,104 @@ function buildPrompt(input: StoryboardGenerationInput): string {
   return `Platform: ${input.platform}\n\nScript:\n${input.script}`;
 }
 
-function parseScenes(raw: string): StoryboardScene[] {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw);
-  } catch {
-    throw new Error("Storyboard provider returned non-JSON output.");
+function isValidSceneEntry(entry: unknown): entry is StoryboardScene {
+  return (
+    typeof entry === "object" &&
+    entry !== null &&
+    typeof (entry as Record<string, unknown>).narration === "string" &&
+    typeof (entry as Record<string, unknown>).visualDescription === "string" &&
+    typeof (entry as Record<string, unknown>).audioDirection === "string" &&
+    typeof (entry as Record<string, unknown>).durationSeconds === "number"
+  );
+}
+
+function normalizeScene(scene: StoryboardScene): StoryboardScene {
+  return {
+    narration: scene.narration,
+    visualDescription: scene.visualDescription,
+    audioDirection: scene.audioDirection,
+    durationSeconds: Math.max(1, Math.round(scene.durationSeconds)),
+  };
+}
+
+/**
+ * A long-form scene list can hit the model's output token ceiling mid-array
+ * — the response is valid JSON up to that point but gets cut off before the
+ * closing `]`. Rather than losing the whole (paid) generation to a parse
+ * error, recover the longest valid prefix: walk back to the last `}` that
+ * balances its own braces from the start of the array, close the array
+ * there, and parse that. Returns null if even that recovery fails.
+ */
+function recoverTruncatedArray(raw: string): StoryboardScene[] | null {
+  const arrayStart = raw.indexOf("[");
+  if (arrayStart === -1) {
+    return null;
   }
 
-  if (!Array.isArray(parsed) || parsed.length === 0) {
-    throw new Error("Storyboard provider returned an empty or non-array scene list.");
-  }
-
-  return parsed.map((entry, index) => {
-    if (
-      typeof entry !== "object" ||
-      entry === null ||
-      typeof (entry as Record<string, unknown>).narration !== "string" ||
-      typeof (entry as Record<string, unknown>).visualDescription !== "string" ||
-      typeof (entry as Record<string, unknown>).audioDirection !== "string" ||
-      typeof (entry as Record<string, unknown>).durationSeconds !== "number"
-    ) {
-      throw new Error(`Storyboard provider returned an unexpected shape for scene ${index}.`);
+  // String-aware: a narration/visualDescription value can itself contain
+  // literal `{`/`}` characters, which would throw off a naive brace
+  // counter and silently recover the wrong prefix. Track whether we're
+  // inside a JSON string (respecting `\"` escapes) and ignore braces there.
+  let depth = 0;
+  let lastCompleteObjectEnd = -1;
+  let inString = false;
+  let escaped = false;
+  for (let i = arrayStart; i < raw.length; i++) {
+    const char = raw[i];
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (char === "\\") {
+        escaped = true;
+      } else if (char === '"') {
+        inString = false;
+      }
+      continue;
     }
+    if (char === '"') {
+      inString = true;
+    } else if (char === "{") {
+      depth++;
+    } else if (char === "}") {
+      depth--;
+      if (depth === 0) {
+        lastCompleteObjectEnd = i;
+      }
+    }
+  }
 
-    const scene = entry as StoryboardScene;
-    return {
-      narration: scene.narration,
-      visualDescription: scene.visualDescription,
-      audioDirection: scene.audioDirection,
-      durationSeconds: Math.max(1, Math.round(scene.durationSeconds)),
-    };
-  });
+  if (lastCompleteObjectEnd === -1) {
+    return null;
+  }
+
+  const recovered = `${raw.slice(arrayStart, lastCompleteObjectEnd + 1)}]`;
+  try {
+    const parsed: unknown = JSON.parse(recovered);
+    if (Array.isArray(parsed) && parsed.every(isValidSceneEntry)) {
+      return parsed.map(normalizeScene);
+    }
+  } catch {
+    // Still not valid — give up and let the caller surface the original error.
+  }
+  return null;
+}
+
+function parseScenes(raw: string, hitTokenLimit: boolean): { scenes: StoryboardScene[]; truncated: boolean } {
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed) || parsed.length === 0 || !parsed.every(isValidSceneEntry)) {
+      throw new Error("Storyboard provider returned an unexpected shape.");
+    }
+    return { scenes: parsed.map(normalizeScene), truncated: false };
+  } catch (err) {
+    if (hitTokenLimit) {
+      const recovered = recoverTruncatedArray(raw);
+      if (recovered && recovered.length > 0) {
+        return { scenes: recovered, truncated: true };
+      }
+    }
+    throw err instanceof Error ? err : new Error("Storyboard provider returned non-JSON output.");
+  }
 }
 
 export class AnthropicStoryboardProvider implements StoryboardProvider {
@@ -73,9 +141,12 @@ export class AnthropicStoryboardProvider implements StoryboardProvider {
     }
 
     const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+    // 8192 comfortably covers long-form scripts (dozens of scenes) — Claude
+    // bills by actual output tokens generated, not this ceiling, so setting
+    // it generously costs nothing for short scripts that finish well under it.
     const message = await client.messages.create({
       model: MODEL,
-      max_tokens: 2048,
+      max_tokens: 8192,
       system: SYSTEM_PROMPT,
       messages: [{ role: "user", content: buildPrompt(input) }],
     });
@@ -86,10 +157,13 @@ export class AnthropicStoryboardProvider implements StoryboardProvider {
       .join("\n")
       .trim();
 
+    const { scenes, truncated } = parseScenes(text, message.stop_reason === "max_tokens");
+
     return {
-      scenes: parseScenes(text),
+      scenes,
       provider: this.name,
       model: MODEL,
+      truncated,
     };
   }
 }

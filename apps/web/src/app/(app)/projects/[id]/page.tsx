@@ -2,7 +2,16 @@ import { and, asc, desc, eq, inArray, isNull } from "drizzle-orm";
 import { notFound } from "next/navigation";
 import { auth } from "@/auth";
 import { db } from "@/db";
-import { continuityChecks, generationJobs, mediaAssets, scenes, scripts, thumbnails, usageCosts } from "@/db/schema";
+import {
+  continuityChecks,
+  generationJobs,
+  jobSteps,
+  mediaAssets,
+  scenes,
+  scripts,
+  thumbnails,
+  usageCosts,
+} from "@/db/schema";
 import { isStalled } from "@/lib/jobs";
 import { assemblyProvider, imageProvider, storyboardProvider, ttsProvider, videoProvider } from "@/lib/providers";
 import { storageProvider } from "@/lib/storage-instance";
@@ -91,6 +100,15 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
   const animationJob = jobs.find((job) => job.type === "animation");
   const assemblyJob = jobs.find((job) => job.type === "assembly");
   const thumbnailJob = jobs.find((job) => job.type === "thumbnail");
+
+  const [storyboardStep] = storyboardJob
+    ? await db
+        .select()
+        .from(jobSteps)
+        .where(and(eq(jobSteps.jobId, storyboardJob.id), eq(jobSteps.name, "generate_storyboard")))
+        .limit(1)
+    : [];
+  const storyboardTruncated = Boolean((storyboardStep?.output as { truncated?: boolean } | null)?.truncated);
 
   const [scriptCost] = scriptJob
     ? await db.select().from(usageCosts).where(eq(usageCosts.jobId, scriptJob.id)).limit(1)
@@ -284,6 +302,19 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
           <p className="rounded-lg border border-dashed border-red-400/40 p-6 text-sm text-red-400">
             Storyboard generation failed: {storyboardJob.error}
           </p>
+        )}
+        {storyboardJob?.status === "succeeded" && storyboardTruncated && (
+          <div className="flex flex-col gap-3 rounded-lg border border-dashed border-amber-400/40 p-4">
+            <p className="text-sm text-amber-400">
+              The model&apos;s response was cut off before finishing — the scene list below may be
+              incomplete. Regenerating replaces it with a fresh attempt (a new request).
+            </p>
+            <GenerateStoryboardForm
+              projectId={project.id}
+              disabledReason={!storyboardProvider.isConfigured() ? "Storyboard generation isn't connected yet — add ANTHROPIC_API_KEY to your environment and restart the app." : null}
+              requestAction={requestStoryboard}
+            />
+          </div>
         )}
 
         {projectScenes.length > 0 ? (

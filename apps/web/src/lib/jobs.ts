@@ -127,6 +127,21 @@ export async function startStep(jobId: string, name: string, stepIndex: number):
   return step.id;
 }
 
+/**
+ * Persists partial progress on a still-running step without completing it —
+ * e.g. a submitted-but-not-yet-finished render id (M4), so a retry after a
+ * stall/crash can resume polling the SAME provider job instead of
+ * resubmitting (and re-paying for) a brand new one.
+ */
+export async function updateStepOutput(stepId: string, output: unknown) {
+  await db.update(jobSteps).set({ output, updatedAt: new Date() }).where(eq(jobSteps.id, stepId));
+}
+
+export async function getStepOutput(stepId: string): Promise<unknown> {
+  const [step] = await db.select({ output: jobSteps.output }).from(jobSteps).where(eq(jobSteps.id, stepId)).limit(1);
+  return step?.output ?? null;
+}
+
 export async function completeStep(stepId: string, output?: unknown) {
   await db
     .update(jobSteps)

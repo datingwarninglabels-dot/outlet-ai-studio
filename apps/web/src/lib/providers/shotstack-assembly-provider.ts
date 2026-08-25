@@ -69,7 +69,7 @@ export class ShotstackAssemblyProvider implements VideoAssemblyProvider {
     return Boolean(process.env.SHOTSTACK_API_KEY);
   }
 
-  async assemble(input: AssembleVideoInput): Promise<AssembleVideoResult> {
+  async submitRender(input: AssembleVideoInput): Promise<{ renderId: string }> {
     if (!this.isConfigured()) {
       throw new Error("SHOTSTACK_API_KEY is not set.");
     }
@@ -113,7 +113,15 @@ export class ShotstackAssemblyProvider implements VideoAssemblyProvider {
     }
 
     const submitBody = (await submitResponse.json()) as { response: { id: string } };
-    const result = await pollUntilComplete(submitBody.response.id);
+    return { renderId: submitBody.response.id };
+  }
+
+  async pollAndDownload(renderId: string): Promise<AssembleVideoResult> {
+    if (!this.isConfigured()) {
+      throw new Error("SHOTSTACK_API_KEY is not set.");
+    }
+
+    const result = await pollUntilComplete(renderId);
 
     if (result.status === "failed" || !result.url) {
       throw new Error(result.error ?? "Shotstack render failed with no error detail.");

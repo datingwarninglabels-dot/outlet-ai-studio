@@ -34,10 +34,12 @@ import {
   confirmJob,
   failJob,
   failStep,
+  getStepOutput,
   isStalled,
   publicErrorMessage,
   requestJob,
   startStep,
+  updateStepOutput,
   withRetry,
 } from "@/lib/jobs";
 import {
@@ -56,7 +58,18 @@ import { sceneUpdateSchema } from "@/lib/validation";
 import { worldSettingSummary } from "@/lib/world-prompt";
 
 const STORYBOARD_MODEL = "claude-sonnet-5";
-const ASSUMED_STORYBOARD_OUTPUT_TOKENS = 1500;
+
+/**
+ * Scales with script length so the pre-confirmation estimate stays honest
+ * for long-form scripts too (M4) — a flat assumption badly undersells cost
+ * once a script needs dozens of scenes instead of a handful. Rough model:
+ * ~600 chars of script per scene, ~220 output tokens (JSON overhead + four
+ * fields) per scene, capped at the provider's own 8192 output ceiling.
+ */
+function estimatedStoryboardOutputTokens(scriptChars: number): number {
+  const estimatedSceneCount = Math.max(2, Math.ceil(scriptChars / 600));
+  return Math.min(8192, estimatedSceneCount * 220);
+}
 
 type ActionState = { error: string };
 
@@ -210,7 +223,7 @@ export async function requestStoryboard(
   const estimate = estimateGenerationCostCents({
     model: STORYBOARD_MODEL,
     promptChars: script.content.length + 800,
-    assumedOutputTokens: ASSUMED_STORYBOARD_OUTPUT_TOKENS,
+    assumedOutputTokens: estimatedStoryboardOutputTokens(script.content.length),
   });
 
   await requestJob({
@@ -241,6 +254,16 @@ async function executeStoryboardJob(job: ProjectJob): Promise<string | null> {
       storyboardProvider.generate({ script: script.content, platform: params.platform }),
     );
 
+    // Storyboard generation isn't resumable per-scene like Visual/Animation
+    // — "try again" always means a fresh attempt (existing UI copy already
+    // says so). Clear any scene list from a previous storyboard job on this
+    // project first, so regenerating (e.g. after a truncated response,
+    // M4) replaces it instead of appending a duplicate batch. Downstream
+    // media assets aren't deleted — they just lose their scene reference
+    // (media_asset.scene_id is "set null" on delete), which is the correct
+    // outcome for a deliberate regenerate.
+    await db.delete(scenes).where(eq(scenes.projectId, job.projectId));
+
     await db.insert(scenes).values(
       result.scenes.map((scene, index) => ({
         projectId: job.projectId,
@@ -255,7 +278,11 @@ async function executeStoryboardJob(job: ProjectJob): Promise<string | null> {
       })),
     );
 
-    await completeStep(stepId, { sceneCount: result.scenes.length });
+    // truncated=true (M4): the model's response hit its output ceiling
+    // mid-array and this is a recovered partial list, not the full
+    // breakdown — never silently drop that context, the Owner needs to know
+    // to regenerate rather than assume the scene list is complete.
+    await completeStep(stepId, { sceneCount: result.scenes.length, truncated: result.truncated });
     await completeJob(job.id);
     return null;
   } catch (err) {
@@ -1106,62 +1133,85 @@ async function executeAssemblyJob(job: ProjectJob): Promise<string | null> {
   const stepId = await startStep(job.id, "assemble_video", 0);
 
   try {
-    const params = job.params as { sceneIds: string[]; aspectRatio: "9:16" | "16:9" };
+    // M4: a render already submitted by a previous (stalled/crashed) attempt
+    // is resumed by polling the same renderId rather than submitting — and
+    // paying for — a second one. startStep() above never clears a step's
+    // existing output, so this survives across retries of the same job.
+    const existingOutput = (await getStepOutput(stepId)) as
+      | { renderId: string; totalDurationSeconds: number }
+      | null;
 
-    const [voiceAsset] = await db
-      .select()
-      .from(mediaAssets)
-      .where(and(eq(mediaAssets.projectId, job.projectId), eq(mediaAssets.type, "voice_audio")))
-      .orderBy(desc(mediaAssets.createdAt))
-      .limit(1);
-    if (!voiceAsset) {
-      throw new Error("Voice track no longer exists.");
-    }
+    let renderId: string;
+    let totalDurationSeconds: number;
 
-    const clips: AssemblyClip[] = [];
-    const captions: AssemblyCaption[] = [];
-    let cursor = 0;
+    if (existingOutput?.renderId) {
+      renderId = existingOutput.renderId;
+      totalDurationSeconds = existingOutput.totalDurationSeconds;
+    } else {
+      const params = job.params as { sceneIds: string[]; aspectRatio: "9:16" | "16:9" };
 
-    for (const sceneId of params.sceneIds) {
-      const [scene] = await db.select().from(scenes).where(eq(scenes.id, sceneId)).limit(1);
-      if (!scene) {
-        throw new Error("A scene was deleted before assembly could run.");
-      }
-
-      const [videoAsset] = await db
+      const [voiceAsset] = await db
         .select()
         .from(mediaAssets)
-        .where(and(eq(mediaAssets.sceneId, sceneId), eq(mediaAssets.type, "scene_video")))
+        .where(and(eq(mediaAssets.projectId, job.projectId), eq(mediaAssets.type, "voice_audio")))
         .orderBy(desc(mediaAssets.createdAt))
         .limit(1);
-
-      const [imageAsset] = videoAsset
-        ? []
-        : await db
-            .select()
-            .from(mediaAssets)
-            .where(and(eq(mediaAssets.sceneId, sceneId), eq(mediaAssets.type, "scene_image")))
-            .orderBy(desc(mediaAssets.createdAt))
-            .limit(1);
-
-      const asset = videoAsset ?? imageAsset;
-      if (!asset) {
-        throw new Error("A scene is missing its visual.");
+      if (!voiceAsset) {
+        throw new Error("Voice track no longer exists.");
       }
 
-      const mediaUrl = await storageProvider.getSignedUrl(asset.storageKey, 1800);
-      const durationSeconds = scene.durationSeconds ?? 5;
+      const clips: AssemblyClip[] = [];
+      const captions: AssemblyCaption[] = [];
+      let cursor = 0;
 
-      clips.push({ mediaUrl, mediaType: videoAsset ? "video" : "image", durationSeconds });
-      captions.push({ text: scene.narration, startSeconds: cursor, durationSeconds });
-      cursor += durationSeconds;
+      for (const sceneId of params.sceneIds) {
+        const [scene] = await db.select().from(scenes).where(eq(scenes.id, sceneId)).limit(1);
+        if (!scene) {
+          throw new Error("A scene was deleted before assembly could run.");
+        }
+
+        const [videoAsset] = await db
+          .select()
+          .from(mediaAssets)
+          .where(and(eq(mediaAssets.sceneId, sceneId), eq(mediaAssets.type, "scene_video")))
+          .orderBy(desc(mediaAssets.createdAt))
+          .limit(1);
+
+        const [imageAsset] = videoAsset
+          ? []
+          : await db
+              .select()
+              .from(mediaAssets)
+              .where(and(eq(mediaAssets.sceneId, sceneId), eq(mediaAssets.type, "scene_image")))
+              .orderBy(desc(mediaAssets.createdAt))
+              .limit(1);
+
+        const asset = videoAsset ?? imageAsset;
+        if (!asset) {
+          throw new Error("A scene is missing its visual.");
+        }
+
+        const mediaUrl = await storageProvider.getSignedUrl(asset.storageKey, 1800);
+        const durationSeconds = scene.durationSeconds ?? 5;
+
+        clips.push({ mediaUrl, mediaType: videoAsset ? "video" : "image", durationSeconds });
+        captions.push({ text: scene.narration, startSeconds: cursor, durationSeconds });
+        cursor += durationSeconds;
+      }
+
+      const audioUrl = await storageProvider.getSignedUrl(voiceAsset.storageKey, 1800);
+
+      const submitted = await withRetry(() =>
+        assemblyProvider.submitRender({ clips, audioUrl, captions, aspectRatio: params.aspectRatio }),
+      );
+      renderId = submitted.renderId;
+      totalDurationSeconds = cursor;
+      // Persist before polling — if the poll below stalls or the process
+      // dies, a retry must find this and resume rather than resubmit.
+      await updateStepOutput(stepId, { renderId, totalDurationSeconds });
     }
 
-    const audioUrl = await storageProvider.getSignedUrl(voiceAsset.storageKey, 1800);
-
-    const result = await withRetry(() =>
-      assemblyProvider.assemble({ clips, audioUrl, captions, aspectRatio: params.aspectRatio }),
-    );
+    const result = await withRetry(() => assemblyProvider.pollAndDownload(renderId));
 
     const storageKey = `projects/${job.projectId}/final-${job.id}.mp4`;
     const uploaded = await storageProvider.putObject({
@@ -1178,10 +1228,10 @@ async function executeAssemblyJob(job: ProjectJob): Promise<string | null> {
       contentType: result.contentType,
       sizeBytes: uploaded.sizeBytes,
       provider: result.provider,
-      metadata: { totalDurationSeconds: cursor },
+      metadata: { totalDurationSeconds },
     });
 
-    await completeStep(stepId, { sizeBytes: uploaded.sizeBytes, totalDurationSeconds: cursor });
+    await completeStep(stepId, { sizeBytes: uploaded.sizeBytes, totalDurationSeconds, renderId });
     await completeJob(job.id);
     return null;
   } catch (err) {

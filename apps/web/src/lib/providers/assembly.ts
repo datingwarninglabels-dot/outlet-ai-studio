@@ -27,7 +27,15 @@ export type AssembleVideoResult = {
 export interface VideoAssemblyProvider {
   readonly name: string;
   isConfigured(): boolean;
-  assemble(input: AssembleVideoInput): Promise<AssembleVideoResult>;
+  /**
+   * Split into submit/poll (M4) rather than one `assemble()` call so a
+   * retry after a stall/crash can resume polling an already-submitted
+   * render instead of resubmitting — and re-paying for — a brand new one.
+   * The caller is responsible for persisting the returned renderId between
+   * the two calls.
+   */
+  submitRender(input: AssembleVideoInput): Promise<{ renderId: string }>;
+  pollAndDownload(renderId: string): Promise<AssembleVideoResult>;
 }
 
 export function shotstackAspectRatioForPlatform(platform: string): "9:16" | "16:9" {

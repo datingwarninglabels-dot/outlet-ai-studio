@@ -223,6 +223,20 @@ export const mediaAssets = pgTable("media_asset", {
   provider: text("provider"),
   model: text("model"),
   metadata: jsonb("metadata"),
+  // Section 17 Media Library fields. No ownerId column: this is a
+  // single-Owner app (bootstrap-locked, no public sign-up), so every
+  // authenticated request already IS the Owner — the Media Library lists
+  // every non-deleted row rather than joining through a parent entity the
+  // way character/world references do (those exist for the generation
+  // pipeline's sake, not for ownership scoping).
+  name: text("name"),
+  tags: jsonb("tags").notNull().default([]),
+  // Trash pattern: soft-deleted here, permanently removed (row + storage
+  // object) either by an explicit "delete permanently" action or by the
+  // lazy recovery-window sweep in media-library/actions.ts — no background
+  // job/cron exists in this app (a deliberate M1.5 decision), so the sweep
+  // runs opportunistically whenever the Media Library page loads.
+  deletedAt: timestamp("deleted_at"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 

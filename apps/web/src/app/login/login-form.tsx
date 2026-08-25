@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { signIn } from "next-auth/react";
 
-export function LoginForm() {
+export function LoginForm({ callbackUrl }: { callbackUrl: string }) {
   const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -25,7 +25,7 @@ export function LoginForm() {
       setError("Incorrect email or password.");
       return;
     }
-    router.push("/dashboard");
+    router.push(callbackUrl);
     router.refresh();
   }
 
@@ -78,7 +78,7 @@ export function LoginForm() {
       </div>
       <button
         type="button"
-        onClick={() => signIn("google", { callbackUrl: "/dashboard" })}
+        onClick={() => signIn("google", { callbackUrl })}
         className="h-11 rounded-lg border border-border font-medium hover:bg-surface-raised"
       >
         Continue with Google

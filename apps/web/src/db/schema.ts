@@ -439,3 +439,15 @@ export const auditEvents = pgTable("audit_event", {
   ipAddress: text("ip_address"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
+
+// Public landing page waitlist (CTA_MODE === "waitlist"). email has a
+// unique constraint so a duplicate signup is idempotent, not an error —
+// see (marketing)/actions.ts. ipHash is a salted one-way hash used only for
+// rate-limiting repeated submissions — the raw IP is never stored.
+export const waitlistSignups = pgTable("waitlist_signup", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  email: text("email").notNull().unique(),
+  creatorType: text("creator_type"),
+  ipHash: text("ip_hash"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});

@@ -10,6 +10,43 @@
   --accent-purple: #8b5cf6;
   --accent-blue: #3b82f6;
   --accent-teal: #2dd4bf;
+  /* Semantic accent tokens — unused by the authenticated app today (it
+     still references accent-purple/blue/teal directly), defined here with
+     a neutral fallback so the utility classes below always resolve to
+     something reasonable even outside the marketing scope. The public
+     marketing page overrides all of these to a warm palette (see
+     [data-brand="marketing"] below) — deliberately named generically
+     rather than e.g. --accent-amber, so a later pass can point the
+     authenticated app at the same names without a component rewrite,
+     per the landing-page brief's brand-direction requirement. */
+  --accent: var(--accent-teal);
+  --accent-strong: var(--accent-blue);
+  --accent-soft: color-mix(in srgb, var(--accent-teal) 14%, transparent);
+  --accent-foreground: #0b0c10;
+}
+
+/* Public marketing brand — warm amber/copper on a warm-neutral near-black,
+   distinct from the authenticated app's cool purple/blue/teal (which is
+   also, worth naming, one of the specific looks that reads as generic
+   AI-generated design — this is a deliberate departure, not an oversight).
+   Shared foundations (spacing, radii, card construction, type scale,
+   interaction patterns, accessibility standards) are NOT redefined here —
+   marketing components reuse the exact same Tailwind utilities and
+   component idioms as the rest of the app, just against these token
+   values instead. Applied via a data attribute on the (marketing) route
+   group's root element, not a class, so it composes cleanly with the
+   dark-mode class already set on <html>. */
+[data-brand="marketing"] {
+  --background: #15110d;
+  --surface: #1c1712;
+  --surface-raised: #241d16;
+  --border: #382d21;
+  --foreground: #f5efe5;
+  --muted: #a89a86;
+  --accent: #e08a3c;
+  --accent-strong: #c76a24;
+  --accent-soft: color-mix(in srgb, #e08a3c 14%, transparent);
+  --accent-foreground: #15110d;
 }
 
 @theme inline {
@@ -22,6 +59,10 @@
   --color-accent-purple: var(--accent-purple);
   --color-accent-blue: var(--accent-blue);
   --color-accent-teal: var(--accent-teal);
+  --color-accent: var(--accent);
+  --color-accent-strong: var(--accent-strong);
+  --color-accent-soft: var(--accent-soft);
+  --color-accent-foreground: var(--accent-foreground);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }
@@ -35,4 +76,19 @@ body {
 :focus-visible {
   outline: 2px solid var(--accent-teal);
   outline-offset: 2px;
+}
+
+[data-brand="marketing"] :focus-visible {
+  outline-color: var(--accent-strong);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }

@@ -54,8 +54,9 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
       `Platform: ${project.platform ?? "unspecified"}`,
       "",
       "This package contains everything generated for this project so far.",
-      "It does NOT include an assembled final video — compositing the visual,",
-      "voice track, and captions into one video file isn't built yet.",
+      "It does NOT include an assembled final video — compositing the",
+      "per-scene animated clips, voice track, and captions into one video",
+      "file isn't built yet.",
       "",
       "captions.srt/.vtt: one caption per scene, timed from each scene's",
       "estimated duration — not word-level synced, since there's no speech",
@@ -99,7 +100,9 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
           ? "voice.mp3"
           : asset.type === "scene_image"
             ? `visual-scene-${asset.sceneId ?? asset.id}.${asset.contentType.includes("png") ? "png" : "jpg"}`
-            : `${asset.type}-${asset.id}`;
+            : asset.type === "scene_video"
+              ? `animation-scene-${asset.sceneId ?? asset.id}.${asset.contentType.includes("mp4") ? "mp4" : "mov"}`
+              : `${asset.type}-${asset.id}`;
       zip.file(filename, bytes);
     } catch {
       // Storage may have been reconfigured since this asset was generated —

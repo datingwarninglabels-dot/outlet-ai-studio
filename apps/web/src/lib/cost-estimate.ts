@@ -72,3 +72,18 @@ export function estimateImageCostCents(provider: string): number {
   }
   return price;
 }
+
+// Confirmed against docs.dev.runwayml.com/guides/pricing (2026-08): gen4_turbo
+// is 5 credits/second ($0.05/sec). Re-check if Runway changes their pricing
+// or if the video provider's model constant changes.
+const VIDEO_PRICE_CENTS_PER_SECOND: Record<string, number> = {
+  runway: 5,
+};
+
+export function estimateVideoCostCents(input: { provider: string; durationSeconds: number }): number {
+  const pricePerSecond = VIDEO_PRICE_CENTS_PER_SECOND[input.provider];
+  if (pricePerSecond === undefined) {
+    throw new Error(`No price table entry for video provider "${input.provider}" — add one before estimating cost.`);
+  }
+  return input.durationSeconds * pricePerSecond;
+}

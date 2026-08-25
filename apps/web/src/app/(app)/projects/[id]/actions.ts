@@ -11,6 +11,7 @@ import {
   estimateGenerationCostCents,
   estimateImageCostCents,
   estimateTTSCostCents,
+  estimateVideoCostCents,
 } from "@/lib/cost-estimate";
 import {
   cancelJob,
@@ -25,7 +26,14 @@ import {
   startStep,
   withRetry,
 } from "@/lib/jobs";
-import { imageProvider, ratioForPlatform, scriptProvider, storyboardProvider, ttsProvider } from "@/lib/providers";
+import {
+  imageProvider,
+  ratioForPlatform,
+  scriptProvider,
+  storyboardProvider,
+  ttsProvider,
+  videoProvider,
+} from "@/lib/providers";
 import { storageProvider } from "@/lib/storage-instance";
 import { sceneUpdateSchema } from "@/lib/validation";
 
@@ -641,6 +649,233 @@ export async function retryVisual(_prev: ActionState, formData: FormData): Promi
 }
 
 export async function getVisualUrl(mediaAssetId: string): Promise<string> {
+  const session = await auth();
+  if (!session?.user) {
+    redirect("/login");
+  }
+
+  const [asset] = await db.select().from(mediaAssets).where(eq(mediaAssets.id, mediaAssetId)).limit(1);
+  if (!asset) {
+    throw new Error("Media asset not found.");
+  }
+  await loadOwnedProject(asset.projectId, session.user.id);
+  return storageProvider.getSignedUrl(asset.storageKey);
+}
+
+// --- Animation: request → confirm → run. Turns an existing scene image
+// into a short video via Runway's image-to-video endpoint. Same resumable
+// per-scene job pattern as Visual — a batch only targets scenes that have
+// an image but no animation yet, and retry skips scenes already done. ---
+
+function pickVideoDuration(sceneDurationSeconds: number | null): 5 | 10 {
+  return (sceneDurationSeconds ?? 5) <= 5 ? 5 : 10;
+}
+
+export async function requestAnimation(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  const session = await auth();
+  if (!session?.user) {
+    redirect("/login");
+  }
+
+  const projectId = String(formData.get("projectId") ?? "");
+  const project = await loadOwnedProject(projectId, session.user.id);
+
+  const idempotencyKey = String(formData.get("idempotencyKey") ?? "");
+  if (!idempotencyKey) {
+    return { error: "Missing request key — reload the page and try again." };
+  }
+
+  if (!videoProvider.isConfigured()) {
+    return {
+      error:
+        "Animation isn't connected yet — add RUNWAYML_API_SECRET to your environment and restart the app.",
+    };
+  }
+  if (!storageProvider.isConfigured()) {
+    return {
+      error:
+        "Private storage isn't connected yet — set STORAGE_BUCKET/STORAGE_ACCESS_KEY_ID/STORAGE_SECRET_ACCESS_KEY and restart the app.",
+    };
+  }
+
+  const projectScenes = await db
+    .select()
+    .from(scenes)
+    .where(eq(scenes.projectId, project.id))
+    .orderBy(asc(scenes.order));
+
+  if (projectScenes.length === 0) {
+    return { error: "Generate a storyboard first." };
+  }
+
+  const allAssets = await db.select().from(mediaAssets).where(eq(mediaAssets.projectId, project.id));
+  const imageSceneIds = new Set(allAssets.filter((a) => a.type === "scene_image").map((a) => a.sceneId));
+  const videoSceneIds = new Set(allAssets.filter((a) => a.type === "scene_video").map((a) => a.sceneId));
+
+  const scenesNeeded = projectScenes.filter((s) => imageSceneIds.has(s.id) && !videoSceneIds.has(s.id));
+  if (scenesNeeded.length === 0) {
+    return {
+      error: imageSceneIds.size > 0
+        ? "Every scene with a visual already has an animation."
+        : "Generate visuals first — animation is built from a scene's existing image.",
+    };
+  }
+
+  const ratio = ratioForPlatform(project.platform ?? "Custom Project");
+  const estimatedCostCents = scenesNeeded.reduce(
+    (sum, s) =>
+      sum +
+      estimateVideoCostCents({
+        provider: videoProvider.name,
+        durationSeconds: pickVideoDuration(s.durationSeconds),
+      }),
+    0,
+  );
+
+  await requestJob({
+    projectId: project.id,
+    type: "animation",
+    provider: videoProvider.name,
+    model: null,
+    idempotencyKey,
+    params: { sceneIds: scenesNeeded.map((s) => s.id), ratio },
+    estimatedCostCents,
+  });
+
+  revalidatePath(`/projects/${project.id}`);
+  return { error: "" };
+}
+
+async function executeAnimationJob(job: typeof generationJobs.$inferSelect): Promise<string | null> {
+  const params = job.params as { sceneIds: string[]; ratio: string };
+
+  const doneAssets = await db
+    .select({ sceneId: mediaAssets.sceneId })
+    .from(mediaAssets)
+    .where(and(eq(mediaAssets.jobId, job.id), eq(mediaAssets.type, "scene_video")));
+  const doneSceneIds = new Set(doneAssets.map((a) => a.sceneId));
+
+  for (let i = 0; i < params.sceneIds.length; i++) {
+    const sceneId = params.sceneIds[i];
+    if (doneSceneIds.has(sceneId)) {
+      continue;
+    }
+
+    const stepId = await startStep(job.id, `animate_scene_${i}`, i);
+
+    const [scene] = await db.select().from(scenes).where(eq(scenes.id, sceneId)).limit(1);
+    const [imageAsset] = await db
+      .select()
+      .from(mediaAssets)
+      .where(and(eq(mediaAssets.sceneId, sceneId), eq(mediaAssets.type, "scene_image")))
+      .orderBy(desc(mediaAssets.createdAt))
+      .limit(1);
+
+    if (!scene || !imageAsset) {
+      const msg = "This scene's source image is missing — generate a visual for it first.";
+      await failStep(stepId, msg);
+      await failJob(job.id, msg, msg);
+      return msg;
+    }
+
+    try {
+      const imageUrl = await storageProvider.getSignedUrl(imageAsset.storageKey, 600);
+      const durationSeconds = pickVideoDuration(scene.durationSeconds);
+      const result = await withRetry(() =>
+        videoProvider.generate({
+          imageUrl,
+          prompt: scene.visualDescription,
+          ratio: params.ratio,
+          durationSeconds,
+        }),
+      );
+
+      const extension = result.contentType.includes("mp4") ? "mp4" : "mov";
+      const storageKey = `projects/${job.projectId}/scenes/${sceneId}/animation-${job.id}.${extension}`;
+      const uploaded = await storageProvider.putObject({
+        key: storageKey,
+        body: result.video,
+        contentType: result.contentType,
+      });
+
+      await db.insert(mediaAssets).values({
+        projectId: job.projectId,
+        jobId: job.id,
+        sceneId,
+        type: "scene_video",
+        storageKey: uploaded.key,
+        contentType: result.contentType,
+        sizeBytes: uploaded.sizeBytes,
+        provider: result.provider,
+        model: result.model,
+        metadata: { durationSeconds },
+      });
+
+      await completeStep(stepId, { sizeBytes: uploaded.sizeBytes, durationSeconds });
+    } catch (err) {
+      const publicMsg = publicErrorMessage(err);
+      await failStep(stepId, publicMsg);
+      await failJob(job.id, publicMsg, err instanceof Error ? (err.stack ?? err.message) : String(err));
+      return publicMsg;
+    }
+  }
+
+  await completeJob(job.id);
+  return null;
+}
+
+export async function confirmAnimation(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  const session = await auth();
+  if (!session?.user) {
+    redirect("/login");
+  }
+
+  const jobId = String(formData.get("jobId") ?? "");
+  const job = await getOwnedJob(jobId, session.user.id);
+
+  const confirmed = await confirmJob(jobId);
+  if (confirmed.status !== "running") {
+    revalidatePath(`/projects/${job.projectId}`);
+    return { error: "" };
+  }
+
+  const error = await executeAnimationJob(confirmed);
+  revalidatePath(`/projects/${job.projectId}`);
+  return { error: error ?? "" };
+}
+
+export async function cancelAnimation(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  const session = await auth();
+  if (!session?.user) {
+    redirect("/login");
+  }
+
+  const jobId = String(formData.get("jobId") ?? "");
+  const job = await getOwnedJob(jobId, session.user.id);
+  await cancelJob(jobId);
+  revalidatePath(`/projects/${job.projectId}`);
+  return { error: "" };
+}
+
+export async function retryAnimation(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  const session = await auth();
+  if (!session?.user) {
+    redirect("/login");
+  }
+
+  const jobId = String(formData.get("jobId") ?? "");
+  const job = await getOwnedJob(jobId, session.user.id);
+
+  if (!isStalled(job)) {
+    return { error: "This job isn't stalled." };
+  }
+
+  const error = await executeAnimationJob(job);
+  revalidatePath(`/projects/${job.projectId}`);
+  return { error: error ?? "" };
+}
+
+export async function getAnimationUrl(mediaAssetId: string): Promise<string> {
   const session = await auth();
   if (!session?.user) {
     redirect("/login");

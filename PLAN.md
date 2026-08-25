@@ -80,20 +80,32 @@ using it is just risk with no benefit.
     and only ever served back through short-lived signed URLs, never a
     temporary provider link, per Section 19. New `media_asset` table tracks
     both.
+  - **Animate**: turns each scene's existing still image into a 5-10s clip
+    via Runway's image-to-video endpoint (`gen4_turbo`) — the same
+    resumable-per-scene job pattern as Visual (one job per batch, one step
+    per scene, retry skips scenes already animated). A scene needs a visual
+    before it's eligible. The source image is passed to Runway as a
+    short-lived signed URL (10 min) from private storage, not a public
+    link. `runway-client.ts` now holds the shared submit/poll/download
+    logic both `RunwayImageProvider` and `RunwayVideoProvider` build on, so
+    the two don't duplicate it. Image-to-video's request shape (`promptImage`
+    as a plain URL string, `model: gen4_turbo`, `duration: 5 | 10`, shared
+    ratio values) and `gen4_turbo` pricing (5 credits/sec, $0.05/sec) were
+    verified against Runway's docs the same way as the image leg.
   - **Export**: a free (no new provider cost, so no cost-gate) `.zip`
-    download — script, scene list, SRT/VTT captions, voice track, visuals —
-    via `/api/projects/[id]/export`. Explicitly **not** an assembled final
-    video; that needs real video compositing (ffmpeg or equivalent), which
-    is a large enough, risky enough addition (server runtime/binary
-    concerns, especially for a serverless deploy target) that it's worth
-    its own milestone rather than folding in here unverified. Captions
-    (`captions.ts`) are one cue per scene, timed from each scene's estimated
-    duration — no word-level sync, since there's no speech alignment
-    against the actual generated audio. Pure computation, no provider
-    involved, so this is the one piece of the whole app actually verified
-    working end to end in this environment (ran it directly against sample
-    scene data — cumulative timestamps and SRT/VTT formatting both correct)
-    rather than only typechecked/built.
+    download — script, scene list, SRT/VTT captions, voice track, still
+    visuals, animated clips — via `/api/projects/[id]/export`. Explicitly
+    **not** an assembled final video; that needs real video compositing
+    (ffmpeg or equivalent), which is a large enough, risky enough addition
+    (server runtime/binary concerns, especially for a serverless deploy
+    target) that it's worth its own milestone rather than folding in here
+    unverified. Captions (`captions.ts`) are one cue per scene, timed from
+    each scene's estimated duration — no word-level sync, since there's no
+    speech alignment against the actual generated audio. Pure computation,
+    no provider involved, so this is the one piece of the whole app actually
+    verified working end to end in this environment (ran it directly
+    against sample scene data — cumulative timestamps and SRT/VTT
+    formatting both correct) rather than only typechecked/built.
 - **M1.5 — Job resilience, cost gate, scene breakdown** *(done)*: closed two
   structural gaps from M1 before more (and more expensive) generation types
   build on top of them.

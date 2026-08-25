@@ -321,9 +321,35 @@ using it is just risk with no benefit.
     lint`, both clean, no schema changes needed. Not live-tested — same
     sandbox limitation as the rest of this project; no real long-form
     generation or Shotstack render has been exercised here.
-- **M5**: Brand Kit.
+- **M5 — Brand Kit** *(done)*: one reusable identity per Owner (single-Owner
+  app, so "reusable across projects" means one `brand_kit` row, unique on
+  `ownerId`, not a library of several) — logo/intro/outro uploads, up to 6
+  hex color swatches, fonts, caption style, watermark, default voice ID,
+  default music mood, default visual style. "Automatically apply ... while
+  allowing project overrides" (Section 17) is real behavior: `project`
+  gained nullable `visualStyleOverride`/`voiceIdOverride`; visual generation
+  appends the effective visual style to every scene's image prompt and
+  voice generation passes the effective voice ID to ElevenLabs (which
+  previously had no per-project voice selection at all — only a single
+  env-var default for the whole app). A compact form on the project page
+  shows what it's currently inheriting and lets the Owner set/clear either
+  override. **Deliberately data-only** for logo/intro/outro/watermark/
+  captionStyle/fonts — no consumer yet, clearly labeled in the UI. Burning
+  a watermark, splicing an intro/outro, or styling captions in Assembly is
+  real Shotstack API surface that needs the same verify-before-claiming-
+  support treatment Runway/Shotstack got originally, not a rushed guess;
+  only wired what had a direct, already-verified integration point
+  (prompt text, an existing provider parameter). Verified: `npm run build`
+  (zero TS errors) and `npm run lint`, both clean; migration additive.
+  Not live-tested — same sandbox limitation as the rest of this project.
 - **M6**: PWA polish, accessibility pass, full test suite (Section 23 of the
   master prompt), security review.
+- **Not yet scheduled**: a general Media Library (Section 17 — upload/
+  preview/rename/tag/reuse/download/delete across all media types, storage
+  usage, Trash with a recovery window). The nav item exists (`/media-library`,
+  still `planned`) but no milestone above claims it; M5 only covered the
+  Brand Kit half of Section 17. Worth an explicit decision on where this
+  lands before M6, rather than assuming it's implicitly covered.
 
 ## Credentials needed (not all at once — per milestone)
 

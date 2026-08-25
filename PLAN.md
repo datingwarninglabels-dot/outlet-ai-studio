@@ -275,8 +275,52 @@ using it is just risk with no benefit.
     lip-sync per character); the pre-render still-preview step Section 10
     also asks for; any UI to browse historical/acknowledged continuity
     checks (only the latest open one per scene surfaces).
-- **M4**: Long-form resilience — resumable/retryable/idempotent scene-by-
-  scene rendering at higher scene counts than tested so far.
+- **M4 — Long-form resilience** *(done)*: resumable/retryable/idempotent
+  scene-by-scene rendering at higher scene counts than tested so far.
+  - **Storyboard generation** was the actual blocker for everything else in
+    this milestone — the prompt capped scenes at "usually 2-8" and
+    `max_tokens: 2048` meant a long-form attempt would either get
+    compressed to fit or silently truncated mid-JSON-array and crash the
+    whole (paid) generation. Fixed: removed the artificial cap so scene
+    count scales with script length, raised `max_tokens` to 8192 (Claude
+    bills by actual tokens generated, not this ceiling, so raising it costs
+    nothing for short scripts), and added a string-aware truncation-tolerant
+    parser that recovers the longest valid prefix of complete scenes when
+    the response still hits the ceiling (checked via `stop_reason ===
+    "max_tokens"`) rather than throwing the whole thing away. Actually
+    tested the recovery logic against 7 cases in isolation before wiring it
+    in (including narration text containing literal `{`/`}` characters,
+    which a naive brace-counter gets wrong) — caught a real depth-tracking
+    bug this way. The UI surfaces `truncated: true` with a regenerate
+    button; regenerating now correctly replaces the existing scene list
+    (`executeStoryboardJob` didn't handle "scenes already exist" before,
+    since the old UI only ever offered regenerate when there were none).
+    Cost estimate now scales with script length instead of a flat
+    assumption, so long-form requests get an honest pre-confirmation
+    number.
+  - **Assembly (Shotstack)** was the one generation leg that wasn't
+    actually idempotent on retry — a stall/crash mid-render meant retry
+    resubmitted (and re-paid for) an entire new render. Fixed by splitting
+    `VideoAssemblyProvider.assemble()` into `submitRender()`/
+    `pollAndDownload()`; the render id is persisted to the job step's
+    output immediately after submission (new `updateStepOutput`/
+    `getStepOutput` helpers in `jobs.ts`), so a retry resumes polling the
+    *same* render instead of starting a new one. This also means a poll
+    that simply times out (more likely as total render time grows with
+    scene count) now recovers for free on retry rather than needing an
+    expensive resubmit.
+  - **Voice generation was checked and found not to need chunking**: verified
+    against ElevenLabs' docs that `eleven_turbo_v2_5` (the model already in
+    use) accepts up to 40,000 characters per request — roughly 40 minutes
+    of audio, far beyond what this app would realistically produce even at
+    high scene counts. Deliberately did not add chunking/concatenation
+    complexity to solve a gap that verification showed doesn't actually
+    exist at this app's scale; worth re-checking only if the app ever
+    targets multi-hour narration.
+  - Verified: `npm run build` (TypeScript strict, zero errors) and `npm run
+    lint`, both clean, no schema changes needed. Not live-tested — same
+    sandbox limitation as the rest of this project; no real long-form
+    generation or Shotstack render has been exercised here.
 - **M5**: Brand Kit.
 - **M6**: PWA polish, accessibility pass, full test suite (Section 23 of the
   master prompt), security review.

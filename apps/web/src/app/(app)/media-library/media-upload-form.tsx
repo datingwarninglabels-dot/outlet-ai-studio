@@ -20,7 +20,7 @@ export function MediaUploadForm({ projects }: { projects: { id: string; title: s
             id="category"
             name="category"
             required
-            className="h-10 rounded-lg border border-border bg-background px-3 text-sm outline-none focus-visible:border-accent-teal"
+            className="h-11 rounded-lg border border-border bg-background px-3 text-sm outline-none focus-visible:border-accent-teal"
           >
             {MEDIA_CATEGORIES.map((c) => (
               <option key={c.key} value={c.key}>
@@ -37,7 +37,7 @@ export function MediaUploadForm({ projects }: { projects: { id: string; title: s
             id="projectId"
             name="projectId"
             defaultValue=""
-            className="h-10 rounded-lg border border-border bg-background px-3 text-sm outline-none focus-visible:border-accent-teal"
+            className="h-11 rounded-lg border border-border bg-background px-3 text-sm outline-none focus-visible:border-accent-teal"
           >
             <option value="">Shared library (no project)</option>
             {projects.map((p) => (
@@ -56,7 +56,7 @@ export function MediaUploadForm({ projects }: { projects: { id: string; title: s
             type="file"
             name="file"
             required
-            className="text-sm file:mr-3 file:h-9 file:rounded-lg file:border file:border-border file:bg-background file:px-3 file:text-sm"
+            className="text-sm file:mr-3 file:h-11 file:rounded-lg file:border file:border-border file:bg-background file:px-3 file:text-sm"
           />
         </div>
       </div>
@@ -68,7 +68,7 @@ export function MediaUploadForm({ projects }: { projects: { id: string; title: s
       <button
         type="submit"
         disabled={pending}
-        className="h-10 w-fit rounded-lg bg-gradient-to-r from-accent-purple via-accent-blue to-accent-teal px-4 text-sm font-medium text-black disabled:cursor-not-allowed disabled:opacity-60"
+        className="h-11 w-fit rounded-lg bg-gradient-to-r from-accent-purple via-accent-blue to-accent-teal px-4 text-sm font-medium text-black disabled:cursor-not-allowed disabled:opacity-60"
       >
         {pending ? "Uploading..." : "Upload"}
       </button>

@@ -35,7 +35,7 @@ export function ProjectOverridesForm({
             defaultValue={visualStyleOverride}
             placeholder="leave blank to use the Brand Kit default"
             maxLength={300}
-            className="h-10 rounded-lg border border-border bg-background px-3 text-sm outline-none focus-visible:border-accent-teal"
+            className="h-11 rounded-lg border border-border bg-background px-3 text-sm outline-none focus-visible:border-accent-teal"
           />
         </div>
         <div className="flex flex-col gap-1">
@@ -48,7 +48,7 @@ export function ProjectOverridesForm({
             defaultValue={voiceIdOverride}
             placeholder="leave blank to use the Brand Kit default"
             maxLength={300}
-            className="h-10 rounded-lg border border-border bg-background px-3 text-sm outline-none focus-visible:border-accent-teal"
+            className="h-11 rounded-lg border border-border bg-background px-3 text-sm outline-none focus-visible:border-accent-teal"
           />
         </div>
       </div>
@@ -60,7 +60,7 @@ export function ProjectOverridesForm({
       <button
         type="submit"
         disabled={pending}
-        className="h-9 w-fit rounded-lg border border-border px-4 text-sm hover:bg-surface-raised disabled:cursor-not-allowed disabled:opacity-60"
+        className="h-11 w-fit rounded-lg border border-border px-4 text-sm hover:bg-surface-raised disabled:cursor-not-allowed disabled:opacity-60"
       >
         {pending ? "Saving..." : "Save overrides"}
       </button>

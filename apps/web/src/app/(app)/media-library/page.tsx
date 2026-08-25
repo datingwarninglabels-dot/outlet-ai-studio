@@ -98,7 +98,7 @@ export default async function MediaLibraryPage({
             id="project"
             name="project"
             defaultValue={projectFilter ?? ""}
-            className="h-10 rounded-lg border border-border bg-surface px-3 text-sm outline-none focus-visible:border-accent-teal"
+            className="h-11 rounded-lg border border-border bg-surface px-3 text-sm outline-none focus-visible:border-accent-teal"
           >
             <option value="">All</option>
             {ownedProjects.map((p) => (
@@ -116,7 +116,7 @@ export default async function MediaLibraryPage({
             id="category"
             name="category"
             defaultValue={categoryFilter ?? ""}
-            className="h-10 rounded-lg border border-border bg-surface px-3 text-sm outline-none focus-visible:border-accent-teal"
+            className="h-11 rounded-lg border border-border bg-surface px-3 text-sm outline-none focus-visible:border-accent-teal"
           >
             <option value="">All (includes generated media)</option>
             {MEDIA_CATEGORIES.map((c) => (
@@ -128,7 +128,7 @@ export default async function MediaLibraryPage({
         </div>
         <button
           type="submit"
-          className="h-10 rounded-lg border border-border px-4 text-sm hover:bg-surface-raised"
+          className="h-11 rounded-lg border border-border px-4 text-sm hover:bg-surface-raised"
         >
           Apply filters
         </button>

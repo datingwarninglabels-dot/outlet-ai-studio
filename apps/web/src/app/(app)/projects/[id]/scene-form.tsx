@@ -84,7 +84,7 @@ export function SceneEditForm({
               type="submit"
               disabled={moving || index === 0}
               aria-label={`Move scene ${index + 1} up`}
-              className="h-9 w-9 rounded-lg border border-border text-sm hover:bg-surface-raised disabled:cursor-not-allowed disabled:opacity-40"
+              className="h-11 w-11 rounded-lg border border-border text-sm hover:bg-surface-raised disabled:cursor-not-allowed disabled:opacity-40"
             >
               ↑
             </button>
@@ -97,7 +97,7 @@ export function SceneEditForm({
               type="submit"
               disabled={moving || index === sceneCount - 1}
               aria-label={`Move scene ${index + 1} down`}
-              className="h-9 w-9 rounded-lg border border-border text-sm hover:bg-surface-raised disabled:cursor-not-allowed disabled:opacity-40"
+              className="h-11 w-11 rounded-lg border border-border text-sm hover:bg-surface-raised disabled:cursor-not-allowed disabled:opacity-40"
             >
               ↓
             </button>
@@ -229,7 +229,7 @@ export function SceneEditForm({
           <button
             type="submit"
             disabled={pending}
-            className="h-9 rounded-lg border border-border px-4 text-sm font-medium hover:bg-surface-raised disabled:cursor-not-allowed disabled:opacity-60"
+            className="h-11 rounded-lg border border-border px-4 text-sm font-medium hover:bg-surface-raised disabled:cursor-not-allowed disabled:opacity-60"
           >
             {pending ? "Saving..." : "Save changes"}
           </button>

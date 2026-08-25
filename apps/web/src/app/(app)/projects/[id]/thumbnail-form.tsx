@@ -81,7 +81,7 @@ export function ThumbnailCard({
           name="headlineText"
           defaultValue={headlineText}
           maxLength={120}
-          className="h-10 rounded-lg border border-border bg-background px-3 text-sm outline-none focus-visible:border-accent-teal"
+          className="h-11 rounded-lg border border-border bg-background px-3 text-sm outline-none focus-visible:border-accent-teal"
         />
         {state.error && (
           <p role="alert" className="text-xs text-red-400">
@@ -91,7 +91,7 @@ export function ThumbnailCard({
         <button
           type="submit"
           disabled={pending}
-          className="h-9 rounded-lg border border-border text-sm hover:bg-surface-raised disabled:cursor-not-allowed disabled:opacity-60"
+          className="h-11 rounded-lg border border-border text-sm hover:bg-surface-raised disabled:cursor-not-allowed disabled:opacity-60"
         >
           {pending ? "Updating..." : "Update headline"}
         </button>

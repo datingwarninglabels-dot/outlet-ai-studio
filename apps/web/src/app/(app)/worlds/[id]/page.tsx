@@ -157,7 +157,7 @@ export default async function WorldDetailPage({ params }: { params: Promise<{ id
         <input type="hidden" name="worldId" value={world.id} />
         <button
           type="submit"
-          className="h-10 w-fit rounded-lg border border-red-400/40 px-4 text-sm text-red-400 hover:bg-red-400/10"
+          className="h-11 w-fit rounded-lg border border-red-400/40 px-4 text-sm text-red-400 hover:bg-red-400/10"
         >
           Delete world (permanent — removes all reference images from storage too)
         </button>

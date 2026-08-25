@@ -162,7 +162,7 @@ export default async function CharacterDetailPage({ params }: { params: Promise<
         <input type="hidden" name="characterId" value={character.id} />
         <button
           type="submit"
-          className="h-10 w-fit rounded-lg border border-red-400/40 px-4 text-sm text-red-400 hover:bg-red-400/10"
+          className="h-11 w-fit rounded-lg border border-red-400/40 px-4 text-sm text-red-400 hover:bg-red-400/10"
         >
           Delete character (permanent — removes all reference images from storage too)
         </button>

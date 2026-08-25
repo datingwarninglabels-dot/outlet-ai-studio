@@ -47,7 +47,7 @@ export function JobConfirmCard({
           <button
             type="submit"
             disabled={confirming || cancelling}
-            className="h-10 rounded-lg bg-gradient-to-r from-accent-purple via-accent-blue to-accent-teal px-4 text-sm font-medium text-black disabled:opacity-60"
+            className="h-11 rounded-lg bg-gradient-to-r from-accent-purple via-accent-blue to-accent-teal px-4 text-sm font-medium text-black disabled:opacity-60"
           >
             {confirming ? "Generating..." : "Confirm & generate"}
           </button>
@@ -57,7 +57,7 @@ export function JobConfirmCard({
           <button
             type="submit"
             disabled={confirming || cancelling}
-            className="h-10 rounded-lg border border-border px-4 text-sm text-muted disabled:opacity-60"
+            className="h-11 rounded-lg border border-border px-4 text-sm text-muted disabled:opacity-60"
           >
             Cancel
           </button>
@@ -94,7 +94,7 @@ export function StalledJobCard({
         <button
           type="submit"
           disabled={pending}
-          className="h-10 w-fit rounded-lg border border-border px-4 text-sm disabled:opacity-60"
+          className="h-11 w-fit rounded-lg border border-border px-4 text-sm disabled:opacity-60"
         >
           {pending ? "Retrying..." : "Retry"}
         </button>

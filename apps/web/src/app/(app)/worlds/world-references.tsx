@@ -16,7 +16,7 @@ export function UploadReferenceForm({ worldId }: { worldId: string }) {
         name="file"
         accept="image/*"
         required
-        className="text-sm file:mr-3 file:h-9 file:rounded-lg file:border file:border-border file:bg-surface file:px-3 file:text-sm"
+        className="text-sm file:mr-3 file:h-11 file:rounded-lg file:border file:border-border file:bg-surface file:px-3 file:text-sm"
       />
       {state.error && (
         <p role="alert" className="text-xs text-red-400">
@@ -26,7 +26,7 @@ export function UploadReferenceForm({ worldId }: { worldId: string }) {
       <button
         type="submit"
         disabled={pending}
-        className="h-10 w-fit rounded-lg border border-border px-4 text-sm hover:bg-surface-raised disabled:cursor-not-allowed disabled:opacity-60"
+        className="h-11 w-fit rounded-lg border border-border px-4 text-sm hover:bg-surface-raised disabled:cursor-not-allowed disabled:opacity-60"
       >
         {pending ? "Uploading..." : "Upload reference image"}
       </button>
@@ -66,7 +66,7 @@ export function ReferenceCard({
             <button
               type="submit"
               disabled={pendingAction !== null}
-              className="h-8 rounded-lg border border-accent-teal/40 px-3 text-xs text-accent-teal hover:bg-surface-raised disabled:opacity-60"
+              className="h-11 rounded-lg border border-accent-teal/40 px-3 text-xs text-accent-teal hover:bg-surface-raised disabled:opacity-60"
             >
               {pendingAction === "approve" ? "Approving..." : "Approve"}
             </button>
@@ -76,7 +76,7 @@ export function ReferenceCard({
             <button
               type="submit"
               disabled={pendingAction !== null}
-              className="h-8 rounded-lg border border-border px-3 text-xs text-muted hover:bg-surface-raised disabled:opacity-60"
+              className="h-11 rounded-lg border border-border px-3 text-xs text-muted hover:bg-surface-raised disabled:opacity-60"
             >
               {pendingAction === "reject" ? "Removing..." : "Reject"}
             </button>

@@ -37,7 +37,7 @@ function Field({ label, name, defaultValue, required }: { label: string; name: s
         defaultValue={defaultValue ?? ""}
         required={required}
         maxLength={300}
-        className="h-10 rounded-lg border border-border bg-surface px-3 text-sm outline-none focus-visible:border-accent-teal"
+        className="h-11 rounded-lg border border-border bg-surface px-3 text-sm outline-none focus-visible:border-accent-teal"
       />
     </div>
   );

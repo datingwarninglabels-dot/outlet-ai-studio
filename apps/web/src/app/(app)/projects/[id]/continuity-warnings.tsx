@@ -27,7 +27,7 @@ export function ContinuityWarningsCard({
         <button
           type="submit"
           disabled={acknowledging}
-          className="h-8 rounded-lg border border-border px-3 text-xs hover:bg-surface-raised disabled:opacity-60"
+          className="h-11 rounded-lg border border-border px-3 text-xs hover:bg-surface-raised disabled:opacity-60"
         >
           {acknowledging ? "Approving..." : "Approve — this change was intentional"}
         </button>

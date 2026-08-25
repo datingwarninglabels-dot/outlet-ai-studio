@@ -87,12 +87,12 @@ export function MediaCard({
           defaultValue={asset.name ?? ""}
           placeholder="Rename..."
           maxLength={200}
-          className="h-8 flex-1 rounded border border-border bg-background px-2 text-xs outline-none focus-visible:border-accent-teal"
+          className="h-11 flex-1 rounded border border-border bg-background px-2 text-xs outline-none focus-visible:border-accent-teal"
         />
         <button
           type="submit"
           disabled={renaming}
-          className="h-8 rounded border border-border px-2 text-xs hover:bg-surface-raised disabled:opacity-60"
+          className="h-11 rounded border border-border px-2 text-xs hover:bg-surface-raised disabled:opacity-60"
         >
           {renaming ? "..." : "Save"}
         </button>
@@ -106,12 +106,12 @@ export function MediaCard({
           defaultValue={asset.tags.join(", ")}
           placeholder="tags, comma-separated"
           maxLength={300}
-          className="h-8 flex-1 rounded border border-border bg-background px-2 text-xs outline-none focus-visible:border-accent-teal"
+          className="h-11 flex-1 rounded border border-border bg-background px-2 text-xs outline-none focus-visible:border-accent-teal"
         />
         <button
           type="submit"
           disabled={savingTags}
-          className="h-8 rounded border border-border px-2 text-xs hover:bg-surface-raised disabled:opacity-60"
+          className="h-11 rounded border border-border px-2 text-xs hover:bg-surface-raised disabled:opacity-60"
         >
           {savingTags ? "..." : "Tag"}
         </button>
@@ -124,7 +124,7 @@ export function MediaCard({
           <select
             name="projectId"
             defaultValue={asset.projectId ?? ""}
-            className="h-8 flex-1 rounded border border-border bg-background px-1 text-xs outline-none focus-visible:border-accent-teal"
+            className="h-11 flex-1 rounded border border-border bg-background px-1 text-xs outline-none focus-visible:border-accent-teal"
           >
             <option value="">Shared library</option>
             {projects.map((p) => (
@@ -136,7 +136,7 @@ export function MediaCard({
           <button
             type="submit"
             disabled={assigning}
-            className="h-8 rounded border border-border px-2 text-xs hover:bg-surface-raised disabled:opacity-60"
+            className="h-11 rounded border border-border px-2 text-xs hover:bg-surface-raised disabled:opacity-60"
           >
             {assigning ? "..." : "Reuse in"}
           </button>
@@ -148,7 +148,7 @@ export function MediaCard({
         <a
           href={url}
           download
-          className="h-8 flex-1 rounded border border-border px-2 text-center text-xs leading-8 hover:bg-surface-raised"
+          className="flex h-11 flex-1 items-center justify-center rounded border border-border px-2 text-center text-xs hover:bg-surface-raised"
         >
           Download
         </a>
@@ -158,13 +158,13 @@ export function MediaCard({
             <button
               type="submit"
               disabled={trashing}
-              className="h-8 w-full rounded border border-red-400/40 px-2 text-xs text-red-400 hover:bg-red-400/10 disabled:opacity-60"
+              className="h-11 w-full rounded border border-red-400/40 px-2 text-xs text-red-400 hover:bg-red-400/10 disabled:opacity-60"
             >
               {trashing ? "..." : "Move to Trash"}
             </button>
           </form>
         ) : (
-          <p className="flex h-8 flex-1 items-center justify-center text-center text-[10px] text-muted">
+          <p className="flex h-11 flex-1 items-center justify-center text-center text-[10px] text-muted">
             Generated — manage from its own page
           </p>
         )}
@@ -195,7 +195,7 @@ export function TrashCard({
           <button
             type="submit"
             disabled={restoring}
-            className="h-8 rounded border border-border px-3 text-xs hover:bg-surface-raised disabled:opacity-60"
+            className="h-11 rounded border border-border px-3 text-xs hover:bg-surface-raised disabled:opacity-60"
           >
             {restoring ? "..." : "Restore"}
           </button>
@@ -205,7 +205,7 @@ export function TrashCard({
           <button
             type="submit"
             disabled={deleting}
-            className="h-8 rounded border border-red-400/40 px-3 text-xs text-red-400 hover:bg-red-400/10 disabled:opacity-60"
+            className="h-11 rounded border border-red-400/40 px-3 text-xs text-red-400 hover:bg-red-400/10 disabled:opacity-60"
           >
             {deleting ? "..." : "Delete permanently"}
           </button>

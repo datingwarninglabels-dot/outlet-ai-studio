@@ -27,7 +27,7 @@ function Field({
         defaultValue={defaultValue ?? ""}
         placeholder={placeholder}
         maxLength={300}
-        className="h-10 rounded-lg border border-border bg-surface px-3 text-sm outline-none focus-visible:border-accent-teal"
+        className="h-11 rounded-lg border border-border bg-surface px-3 text-sm outline-none focus-visible:border-accent-teal"
       />
     </div>
   );
@@ -61,7 +61,7 @@ export function BrandKitForm({
           defaultValue={defaults.colors.join(", ")}
           placeholder="#3366FF, #1A1A2E"
           maxLength={300}
-          className="h-10 rounded-lg border border-border bg-surface px-3 text-sm outline-none focus-visible:border-accent-teal"
+          className="h-11 rounded-lg border border-border bg-surface px-3 text-sm outline-none focus-visible:border-accent-teal"
         />
         {defaults.colors.length > 0 && (
           <div className="mt-1 flex gap-2">
@@ -146,7 +146,7 @@ function AssetUploadForm({
           name="file"
           accept={accept}
           required
-          className="text-sm file:mr-3 file:h-9 file:rounded-lg file:border file:border-border file:bg-background file:px-3 file:text-sm"
+          className="text-sm file:mr-3 file:h-11 file:rounded-lg file:border file:border-border file:bg-background file:px-3 file:text-sm"
         />
         {state.error && (
           <p role="alert" className="text-xs text-red-400">
@@ -156,7 +156,7 @@ function AssetUploadForm({
         <button
           type="submit"
           disabled={pending}
-          className="h-9 w-fit rounded-lg border border-border px-3 text-sm hover:bg-surface-raised disabled:cursor-not-allowed disabled:opacity-60"
+          className="h-11 w-fit rounded-lg border border-border px-3 text-sm hover:bg-surface-raised disabled:cursor-not-allowed disabled:opacity-60"
         >
           {pending ? "Uploading..." : currentUrl ? "Replace" : "Upload"}
         </button>

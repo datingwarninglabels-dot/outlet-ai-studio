@@ -57,7 +57,7 @@ export function RunConsistencyTestForm({
       <button
         type="submit"
         disabled={pending || Boolean(disabledReason)}
-        className="h-10 w-fit rounded-lg border border-border px-4 text-sm hover:bg-surface-raised disabled:cursor-not-allowed disabled:opacity-60"
+        className="h-11 w-fit rounded-lg border border-border px-4 text-sm hover:bg-surface-raised disabled:cursor-not-allowed disabled:opacity-60"
       >
         {pending ? "Estimating cost..." : "Run consistency test (1 cheap image)"}
       </button>

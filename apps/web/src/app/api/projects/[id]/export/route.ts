@@ -3,7 +3,7 @@ import JSZip from "jszip";
 import { NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { db } from "@/db";
-import { mediaAssets, scenes, scripts } from "@/db/schema";
+import { mediaAssets, scenes, scripts, thumbnails } from "@/db/schema";
 import { loadOwnedProject } from "@/lib/authz";
 import { buildSrt, buildVtt } from "@/lib/captions";
 import { storageProvider } from "@/lib/storage-instance";
@@ -39,7 +39,17 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
     .where(eq(scenes.projectId, project.id))
     .orderBy(asc(scenes.order));
 
-  const assets = await db.select().from(mediaAssets).where(eq(mediaAssets.projectId, project.id));
+  const allAssets = await db.select().from(mediaAssets).where(eq(mediaAssets.projectId, project.id));
+
+  // Editing a thumbnail's headline creates a new composited media_asset
+  // without deleting the old one (consistent with how every other
+  // regenerate-in-place action in this app works) — only export each
+  // thumbnail's CURRENT composited version, not every historical edit.
+  const projectThumbnails = await db.select().from(thumbnails).where(eq(thumbnails.projectId, project.id));
+  const currentThumbnailAssetIds = new Set(projectThumbnails.map((t) => t.compositedAssetId).filter(Boolean));
+  const assets = allAssets.filter(
+    (a) => a.type !== "thumbnail_composited" || currentThumbnailAssetIds.has(a.id),
+  );
 
   if (!script && projectScenes.length === 0 && assets.length === 0) {
     return NextResponse.json({ error: "Nothing generated yet for this project." }, { status: 400 });
@@ -61,6 +71,9 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
       "captions.srt/.vtt: one caption per scene, timed from each scene's",
       "estimated duration — not word-level synced, since there's no speech",
       "alignment against the actual generated audio yet.",
+      "",
+      "thumbnails/: current version of each generated thumbnail, with its",
+      "headline text already composited in.",
     ].join("\n"),
   );
 
@@ -93,6 +106,12 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
   }
 
   for (const asset of assets) {
+    // The AI-generated base (no text) is an internal intermediate — only
+    // the text-composited version is useful to export.
+    if (asset.type === "thumbnail_base") {
+      continue;
+    }
+
     try {
       const bytes = await storageProvider.getObject(asset.storageKey);
       const filename =
@@ -104,7 +123,9 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
               ? `animation-scene-${asset.sceneId ?? asset.id}.${asset.contentType.includes("mp4") ? "mp4" : "mov"}`
               : asset.type === "final_video"
                 ? "final-video.mp4"
-                : `${asset.type}-${asset.id}`;
+                : asset.type === "thumbnail_composited"
+                  ? `thumbnails/${projectThumbnails.find((t) => t.compositedAssetId === asset.id)?.style ?? asset.id}.png`
+                  : `${asset.type}-${asset.id}`;
       zip.file(filename, bytes);
     } catch {
       // Storage may have been reconfigured since this asset was generated —

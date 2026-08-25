@@ -2,7 +2,7 @@ import { and, asc, desc, eq } from "drizzle-orm";
 import { notFound } from "next/navigation";
 import { auth } from "@/auth";
 import { db } from "@/db";
-import { generationJobs, mediaAssets, scenes, scripts, usageCosts } from "@/db/schema";
+import { generationJobs, mediaAssets, scenes, scripts, thumbnails, usageCosts } from "@/db/schema";
 import { isStalled } from "@/lib/jobs";
 import { assemblyProvider, imageProvider, storyboardProvider, ttsProvider, videoProvider } from "@/lib/providers";
 import { storageProvider } from "@/lib/storage-instance";
@@ -38,6 +38,8 @@ import { GenerateAnimationForm } from "./animation-form";
 import { GenerateAssemblyForm } from "./assembly-form";
 import { JobConfirmCard, StalledJobCard } from "./job-cards";
 import { GenerateStoryboardForm, SceneEditForm } from "./scene-form";
+import { cancelThumbnails, confirmThumbnails, getThumbnailImageUrl, retryThumbnails } from "./thumbnail-actions";
+import { GenerateThumbnailsForm, ThumbnailCard } from "./thumbnail-form";
 import { GenerateVisualForm } from "./visual-form";
 import { GenerateVoiceForm } from "./voice-form";
 
@@ -80,6 +82,7 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
   const visualJob = jobs.find((job) => job.type === "visual");
   const animationJob = jobs.find((job) => job.type === "animation");
   const assemblyJob = jobs.find((job) => job.type === "assembly");
+  const thumbnailJob = jobs.find((job) => job.type === "thumbnail");
 
   const [scriptCost] = scriptJob
     ? await db.select().from(usageCosts).where(eq(usageCosts.jobId, scriptJob.id)).limit(1)
@@ -98,6 +101,9 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
     : [];
   const [assemblyCost] = assemblyJob
     ? await db.select().from(usageCosts).where(eq(usageCosts.jobId, assemblyJob.id)).limit(1)
+    : [];
+  const [thumbnailCost] = thumbnailJob
+    ? await db.select().from(usageCosts).where(eq(usageCosts.jobId, thumbnailJob.id)).limit(1)
     : [];
 
   const [voiceAsset] = voiceJob
@@ -150,6 +156,20 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
     .orderBy(desc(mediaAssets.createdAt))
     .limit(1);
   const finalVideoUrl = finalVideoAsset ? await getFinalVideoUrl(finalVideoAsset.id) : null;
+
+  const projectThumbnails = await db
+    .select()
+    .from(thumbnails)
+    .where(eq(thumbnails.projectId, project.id))
+    .orderBy(desc(thumbnails.createdAt));
+  const thumbnailCards = await Promise.all(
+    projectThumbnails
+      .filter((t) => t.compositedAssetId)
+      .map(async (t) => ({
+        thumbnail: t,
+        url: await getThumbnailImageUrl(t.compositedAssetId!),
+      })),
+  );
 
   return (
     <div className="flex max-w-2xl flex-col gap-8">
@@ -530,6 +550,64 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
       </section>
 
       <section className="flex flex-col gap-3">
+        <h2 className="text-sm font-medium text-muted">Thumbnails</h2>
+
+        {thumbnailJob?.status === "awaiting_confirmation" && thumbnailCost && (
+          <JobConfirmCard
+            jobId={thumbnailJob.id}
+            estimatedCostCents={thumbnailCost.estimatedCostCents}
+            provider={thumbnailJob.provider}
+            model={thumbnailJob.model}
+            label="thumbnail generation"
+            confirmAction={confirmThumbnails}
+            cancelAction={cancelThumbnails}
+          />
+        )}
+        {thumbnailJob?.status === "running" && isStalled(thumbnailJob) && (
+          <StalledJobCard jobId={thumbnailJob.id} label="Thumbnail generation" retryAction={retryThumbnails} />
+        )}
+        {thumbnailJob?.status === "failed" && (
+          <p className="rounded-lg border border-dashed border-red-400/40 p-6 text-sm text-red-400">
+            Thumbnail generation failed: {thumbnailJob.error}
+          </p>
+        )}
+
+        {thumbnailCards.length > 0 && (
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+            {thumbnailCards.map(({ thumbnail, url }) => (
+              <ThumbnailCard
+                key={thumbnail.id}
+                thumbnailId={thumbnail.id}
+                imageUrl={url}
+                style={thumbnail.style}
+                headlineText={thumbnail.headlineText}
+              />
+            ))}
+          </div>
+        )}
+
+        {(!thumbnailJob || thumbnailJob.status === "failed" || thumbnailJob.status === "cancelled") && (
+          <div className="flex flex-col gap-3 rounded-lg border border-dashed border-border p-6">
+            <p className="text-sm text-muted">
+              {thumbnailCards.length > 0
+                ? "Generate more styles, or edit the headline text on any thumbnail above (free — no new image is generated)."
+                : "No thumbnails yet. Generates several style options with an editable headline overlay."}
+            </p>
+            <GenerateThumbnailsForm
+              projectId={project.id}
+              disabledReason={
+                !imageProvider.isConfigured()
+                  ? "Thumbnail generation isn't connected yet — add RUNWAYML_API_SECRET to your environment and restart the app."
+                  : !storageProvider.isConfigured()
+                    ? "Private storage isn't connected yet — set STORAGE_BUCKET/STORAGE_ACCESS_KEY_ID/STORAGE_SECRET_ACCESS_KEY and restart the app."
+                    : null
+              }
+            />
+          </div>
+        )}
+      </section>
+
+      <section className="flex flex-col gap-3">
         <h2 className="text-sm font-medium text-muted">Export</h2>
         {script || projectScenes.length > 0 ? (
           <div className="flex flex-col gap-2 rounded-lg border border-border bg-surface p-4">
@@ -582,7 +660,8 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
       </section>
 
       <p className="text-xs text-muted">
-        Thumbnail Studio isn&apos;t wired up yet.
+        Thumbnail export dimensions match each platform&apos;s recommended size; background
+        removal isn&apos;t supported yet.
       </p>
     </div>
   );

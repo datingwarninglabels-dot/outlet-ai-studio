@@ -160,16 +160,36 @@ using it is just risk with no benefit.
     out-of-process execution. Also not done: chapter-grouping UI, and
     per-scene visual/voice generation (both explicitly out of scope for this
     slice).
-- **M2**: Multi-scene projects, simple editor, captions, cost-estimate-then-
-  confirm flow before any paid generation.
-- **M3**: Character Library + consistency test workflow.
-- **M4**: World Library + Continuity Checker.
-- **M5**: Long-form resilience — resumable/retryable/idempotent scene-by-
-  scene rendering.
-- **M6**: Provider Hub — add/test/disable connections, fallback rules with
-  confirmation before any fallback that changes cost/quality/privacy.
-- **M7**: Thumbnail Studio, Brand Kit.
-- **M8**: PWA polish, accessibility pass, full test suite (Section 23 of the
+- **M2**: Thumbnail Studio, Provider Hub, Character Library — three
+  independent feature areas the user chose to build in this order, not a
+  single coherent slice like M1. (Multi-scene projects, simple editor, and
+  cost-estimate-then-confirm — M2's original description — turned out to
+  already be fully covered by M1/M1.5.)
+  - **Thumbnail Studio** *(done)*: generates several style-variant
+    thumbnails (Section 15's faceless/dramatic/clean/news/gaming/curiosity
+    styles, pick up to 4 per request) via the existing `ImageProvider`
+    (Runway `gen4_image`) at full platform-correct resolution
+    (`thumbnailRatioForPlatform` — 1920x1080 or 1080x1920, both valid
+    `gen4_image` ratios, no resize step needed). Same resumable-per-item job
+    pattern as Visual/Animation, one item per style. Headline text is
+    editable and **free** to change — a new `thumbnails` table separates
+    the paid AI-generated base image (`media_asset` "thumbnail_base") from
+    the composited-with-text version (`media_asset` "thumbnail_composited",
+    regenerated via `sharp` — no provider call — whenever headline text
+    changes). Includes a CSS-scaled small-size readability preview per
+    Section 15. Text overlay (`thumbnail-overlay.ts`) was actually run and
+    visually inspected against sample images in this environment (both
+    landscape and portrait, including a word-wrap edge case that initially
+    overflowed the canvas and was fixed after seeing the real output) —
+    not just typechecked, one of the few pieces of this app verified that
+    way. Not done: background removal ("when supported" per spec — no
+    verified provider support for it yet), safe-zone visualization beyond
+    a sensible default text position.
+- **M3**: World Library + Continuity Checker.
+- **M4**: Long-form resilience — resumable/retryable/idempotent scene-by-
+  scene rendering at higher scene counts than tested so far.
+- **M5**: Brand Kit.
+- **M6**: PWA polish, accessibility pass, full test suite (Section 23 of the
   master prompt), security review.
 
 ## Credentials needed (not all at once — per milestone)

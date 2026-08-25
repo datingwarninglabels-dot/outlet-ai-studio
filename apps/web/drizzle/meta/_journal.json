@@ -50,6 +50,13 @@
       "when": 1787621875848,
       "tag": "0006_curved_darkstar",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1787626566490,
+      "tag": "0007_previous_fantastic_four",
+      "breakpoints": true
     }
   ]
 }

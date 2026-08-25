@@ -211,6 +211,30 @@ export const mediaAssets = pgTable("media_asset", {
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
+// Tracks the editable headline text separately from the generated image —
+// the AI-generated base costs money (media_asset "thumbnail_base"); the
+// text-composited version is free to regenerate (sharp overlay, no
+// provider call) and is re-derived whenever headlineText changes
+// (media_asset "thumbnail_composited", referenced by compositedAssetId).
+export const thumbnails = pgTable("thumbnail", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  projectId: uuid("project_id")
+    .notNull()
+    .references(() => projects.id, { onDelete: "cascade" }),
+  jobId: uuid("job_id").references(() => generationJobs.id, { onDelete: "set null" }),
+  platform: text("platform").notNull(),
+  style: text("style").notNull(),
+  headlineText: text("headline_text").notNull().default(""),
+  baseAssetId: uuid("base_asset_id")
+    .notNull()
+    .references(() => mediaAssets.id, { onDelete: "cascade" }),
+  compositedAssetId: uuid("composited_asset_id").references(() => mediaAssets.id, {
+    onDelete: "set null",
+  }),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
 export const auditEvents = pgTable("audit_event", {
   id: uuid("id").primaryKey().defaultRandom(),
   userId: text("user_id").references(() => users.id, {

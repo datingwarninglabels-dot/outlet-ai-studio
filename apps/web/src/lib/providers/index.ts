@@ -35,5 +35,5 @@ export type {
   AssemblyCaption,
   VideoAssemblyProvider,
 } from "./assembly";
-export { ratioForPlatform } from "./image";
+export { ratioForPlatform, thumbnailRatioForPlatform } from "./image";
 export { shotstackAspectRatioForPlatform } from "./assembly";

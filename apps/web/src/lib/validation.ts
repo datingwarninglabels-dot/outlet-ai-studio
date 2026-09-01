@@ -11,6 +11,36 @@ export const setupSchema = z.object({
   password: z.string().min(12),
 });
 
+export const registerSchema = z.object({
+  name: z.string().min(1).max(100),
+  email: z.string().email(),
+  // Matches setupSchema's bar, not loginSchema's weaker one — this creates
+  // an account, same as /setup does.
+  password: z.string().min(12),
+  // Honeypot — same pattern as waitlistSchema.
+  website: z.string().max(0).optional(),
+});
+
+export const CREATOR_TYPES = [
+  "Faceless content creator",
+  "YouTube / YouTube Shorts",
+  "TikTok",
+  "Facebook / Instagram Reels",
+  "Marketer or small business",
+  "Storyteller (characters & worlds)",
+  "Other",
+] as const;
+
+export const waitlistSchema = z.object({
+  email: z.string().email().max(320),
+  creatorType: z.enum(CREATOR_TYPES).optional(),
+  consent: z.literal(true, { message: "Consent is required to join the waitlist." }),
+  // Honeypot: a real visitor never sees or fills this field (hidden via
+  // CSS, not `type="hidden"`, so it still gets tabbed past by nothing and
+  // autofilled by nothing legitimate) — a filled value means a bot.
+  website: z.string().max(0).optional(),
+});
+
 export const PLATFORMS = [
   "TikTok",
   "YouTube Short",

@@ -74,15 +74,20 @@ export async function requestThumbnails(_prev: ActionState, formData: FormData):
     };
   }
 
-  await requestJob({
-    projectId: project.id,
-    type: "thumbnail",
-    provider: imageProvider.name,
-    model: null,
-    idempotencyKey,
-    params: { styles, platform: project.platform ?? "Custom Project" },
-    estimatedCostCents: styles.length * estimateImageCostCents(imageProvider.name),
-  });
+  try {
+    await requestJob({
+      ownerId: session.user.id,
+      projectId: project.id,
+      type: "thumbnail",
+      provider: imageProvider.name,
+      model: null,
+      idempotencyKey,
+      params: { styles, platform: project.platform ?? "Custom Project" },
+      estimatedCostCents: styles.length * estimateImageCostCents(imageProvider.name),
+    });
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Something went wrong. Please try again." };
+  }
 
   revalidatePath(`/projects/${project.id}`);
   return { error: "" };
@@ -187,6 +192,7 @@ export async function updateThumbnailText(_prev: ActionState, formData: FormData
   const [newAsset] = await db
     .insert(mediaAssets)
     .values({
+      ownerId: session.user.id,
       projectId: thumbnail.projectId,
       type: "thumbnail_composited",
       storageKey: uploaded.key,

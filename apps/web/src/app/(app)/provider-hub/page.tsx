@@ -1,7 +1,8 @@
-import { eq, sql } from "drizzle-orm";
+import { sql } from "drizzle-orm";
+import { notFound } from "next/navigation";
 import { auth } from "@/auth";
 import { db } from "@/db";
-import { projects, usageCosts } from "@/db/schema";
+import { usageCosts } from "@/db/schema";
 import {
   assemblyProvider,
   imageProvider,
@@ -55,19 +56,32 @@ export const dynamic = "force-dynamic";
 export default async function ProviderHubPage() {
   const session = await auth();
 
-  const spendRows = session?.user
-    ? await db
-        .select({
-          provider: usageCosts.provider,
-          estimatedCents: sql<string>`coalesce(sum(${usageCosts.estimatedCostCents}), 0)`,
-          actualCents: sql<string>`coalesce(sum(${usageCosts.actualCostCents}), 0)`,
-          confirmedCount: sql<string>`count(${usageCosts.confirmedAt})`,
-        })
-        .from(usageCosts)
-        .innerJoin(projects, eq(usageCosts.projectId, projects.id))
-        .where(eq(projects.ownerId, session.user.id))
-        .groupBy(usageCosts.provider)
-    : [];
+  // Defense-in-depth alongside the central redirect in auth.config.ts's
+  // authorized callback — provider config and platform-wide spend are
+  // never customer-facing (confirmed during the marketing landing page's
+  // copy audit).
+  if (session?.user?.role !== "owner") {
+    notFound();
+  }
+
+  // Platform-wide spend, not scoped to the viewing Owner's own projects —
+  // this page is already role-gated above, so "scoped to the Owner" would
+  // now (post-Milestone-2, once customer accounts have their own projects)
+  // silently show near-zero numbers instead of real total spend. No join
+  // to `projects` either: usage_costs rows for character/world image jobs
+  // have a null projectId (see the schema's own "exactly one of
+  // projectId/characterId/worldId" comment) — the previous inner join
+  // silently excluded those entirely, undercounting real spend even before
+  // multi-tenancy existed.
+  const spendRows = await db
+    .select({
+      provider: usageCosts.provider,
+      estimatedCents: sql<string>`coalesce(sum(${usageCosts.estimatedCostCents}), 0)`,
+      actualCents: sql<string>`coalesce(sum(${usageCosts.actualCostCents}), 0)`,
+      confirmedCount: sql<string>`count(${usageCosts.confirmedAt})`,
+    })
+    .from(usageCosts)
+    .groupBy(usageCosts.provider);
 
   const spendByProvider = new Map(
     spendRows.map((row) => [

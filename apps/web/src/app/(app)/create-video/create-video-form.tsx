@@ -1,8 +1,10 @@
 "use client";
 
 import { useActionState, useState } from "react";
+import { PAYWALL_MESSAGE } from "@/lib/paywall-message";
 import { PLATFORMS } from "@/lib/validation";
 import { requestScript } from "./actions";
+import { Paywall } from "../paywall";
 
 const MODES = [
   { value: "quick", label: "Quick", description: "AI makes sensible choices with minimal questions." },
@@ -94,10 +96,14 @@ export function CreateVideoForm({
         ))}
       </fieldset>
 
-      {state.error && (
-        <p role="alert" className="text-sm text-red-400">
-          {state.error}
-        </p>
+      {state.error === PAYWALL_MESSAGE ? (
+        <Paywall compact />
+      ) : (
+        state.error && (
+          <p role="alert" className="text-sm text-red-400">
+            {state.error}
+          </p>
+        )
       )}
 
       <button

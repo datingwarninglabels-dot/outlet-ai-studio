@@ -82,7 +82,11 @@ export function MediaCard({
 
       <form action={renameAction} className="flex gap-1">
         <input type="hidden" name="mediaAssetId" value={asset.id} />
+        <label htmlFor={`rename-${asset.id}`} className="sr-only">
+          Rename this asset
+        </label>
         <input
+          id={`rename-${asset.id}`}
           name="name"
           defaultValue={asset.name ?? ""}
           placeholder="Rename..."
@@ -101,7 +105,11 @@ export function MediaCard({
 
       <form action={tagsAction} className="flex gap-1">
         <input type="hidden" name="mediaAssetId" value={asset.id} />
+        <label htmlFor={`tags-${asset.id}`} className="sr-only">
+          Tags for this asset, comma-separated
+        </label>
         <input
+          id={`tags-${asset.id}`}
           name="tags"
           defaultValue={asset.tags.join(", ")}
           placeholder="tags, comma-separated"

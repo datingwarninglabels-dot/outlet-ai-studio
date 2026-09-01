@@ -43,6 +43,22 @@ export function estimateGenerationCostCents(input: {
   };
 }
 
+// Same price table as estimateGenerationCostCents, but fed the real token
+// counts an Anthropic response actually reports (message.usage) instead of
+// a char-count guess — used to record actual spend after a script/
+// storyboard generation completes, since token usage is the one real
+// source of variance between "estimated" and "actual" cost in this app
+// (every other generation type's cost is already exact/deterministic at
+// request time — see requestJob() call sites).
+export function computeGenerationCostCents(input: { model: string; inputTokens: number; outputTokens: number }): number {
+  const price = MODEL_PRICE_CENTS_PER_MTOK[input.model];
+  if (!price) {
+    throw new Error(`No price table entry for model "${input.model}" — add one before computing cost.`);
+  }
+  const cents = (input.inputTokens / 1_000_000) * price.input + (input.outputTokens / 1_000_000) * price.output;
+  return Math.max(1, Math.ceil(cents));
+}
+
 // Approximate, like the text-only estimate above — Claude's image
 // tokenization depends on resolution and isn't verified precisely here.
 // Treats a typical scene-visual image as roughly 1200 input tokens on top

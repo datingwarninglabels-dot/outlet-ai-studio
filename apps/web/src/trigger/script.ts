@@ -1,6 +1,7 @@
 import { db } from "@/db";
 import { generationJobs, scripts } from "@/db/schema";
-import { completeJob, completeStep, failJob, failStep, publicErrorMessage, startStep, withRetry } from "@/lib/jobs";
+import { computeGenerationCostCents } from "@/lib/cost-estimate";
+import { completeJob, completeStep, failJob, failStep, publicErrorMessage, recordActualCost, startStep, withRetry } from "@/lib/jobs";
 import { scriptProvider } from "@/lib/providers";
 import { defineJobTask } from "./lib/job-task";
 
@@ -34,6 +35,14 @@ export async function executeScriptJob(job: ProjectJob): Promise<string | null> 
       promptTokens: result.promptTokens,
       completionTokens: result.completionTokens,
     });
+    await recordActualCost(
+      job.id,
+      computeGenerationCostCents({
+        model: result.model,
+        inputTokens: result.promptTokens,
+        outputTokens: result.completionTokens,
+      }),
+    );
     await completeJob(job.id);
     return null;
   } catch (err) {

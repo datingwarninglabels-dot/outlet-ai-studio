@@ -75,7 +75,7 @@ const { PAYWALL_MESSAGE } = await import("@/lib/paywall-message");
 // creation/reuse, the actual Stripe call, real DB writes) — it just
 // receives ownerId/email as plain arguments instead of resolving them
 // from a session itself, which is Next.js/NextAuth's job, not this code's.
-const { createCheckoutSession } = await import("@/lib/stripe");
+const { createCheckoutSession, AlreadySubscribedError } = await import("@/lib/stripe");
 const { POST: webhookPost } = await import("@/app/api/stripe/webhook/route");
 const { loadConfirmedJob } = await import("@/trigger/lib/job-task");
 const { getPlan } = await import("@/lib/plans");
@@ -279,6 +279,7 @@ describe("7. Successful payment results in the correct subscription state", () =
     constructEventMock.mockReturnValue({
       id: "evt_scenario7",
       type: "checkout.session.completed",
+      created: Math.floor(Date.now() / 1000),
       data: { object: { mode: "subscription", subscription: "sub_e2e_1" } },
     });
 
@@ -303,6 +304,7 @@ describe("8. Premium access becomes available after confirmed payment", () => {
     constructEventMock.mockReturnValue({
       id: "evt_scenario8",
       type: "checkout.session.completed",
+      created: Math.floor(Date.now() / 1000),
       data: { object: { mode: "subscription", subscription: "sub_e2e_1" } },
     });
     await webhookPost(webhookRequest({}));
@@ -321,6 +323,7 @@ describe("9. User can access premium features", () => {
     constructEventMock.mockReturnValue({
       id: "evt_scenario9",
       type: "checkout.session.completed",
+      created: Math.floor(Date.now() / 1000),
       data: { object: { mode: "subscription", subscription: "sub_e2e_1" } },
     });
     await webhookPost(webhookRequest({}));
@@ -340,14 +343,54 @@ describe("9. User can access premium features", () => {
   });
 });
 
+describe("Plan changes for an already-subscribed owner never create a second Stripe subscription", () => {
+  it("createCheckoutSession refuses (AlreadySubscribedError) once a real active subscription already exists — the only defense against real double-billing", async () => {
+    const { user } = await makeUser("scenario-upgrade@example.com");
+
+    // Get this owner onto a real, active Pro subscription first — same real
+    // webhook flow as scenarios 7-9, not a shortcut.
+    const subscription = stripeSubscription({ customer: "cus_scenario_upgrade", metadata: { ownerId: user.id } });
+    subscriptionsRetrieveMock.mockResolvedValue(subscription);
+    constructEventMock.mockReturnValue({
+      id: "evt_scenario_upgrade",
+      type: "checkout.session.completed",
+      created: Math.floor(Date.now() / 1000),
+      data: { object: { mode: "subscription", subscription: "sub_e2e_1" } },
+    });
+    await webhookPost(webhookRequest({}));
+    expect((await getEntitlement(user.id)).plan).toBe("pro"); // sanity: the setup actually worked
+
+    // Checkout (mode: "subscription") always creates a BRAND NEW Stripe
+    // subscription — completing this would leave the customer with two
+    // separate subscriptions on the same Stripe customer, both billing.
+    // createCheckoutSession must refuse before ever calling Stripe.
+    checkoutSessionsCreateMock.mockClear();
+    await expect(
+      createCheckoutSession({
+        ownerId: user.id,
+        email: user.email,
+        plan: getPlan("studio"),
+        successUrl: "http://localhost/billing?checkout=success",
+        cancelUrl: "http://localhost/billing?checkout=cancelled",
+      }),
+    ).rejects.toThrow(AlreadySubscribedError);
+    expect(checkoutSessionsCreateMock).not.toHaveBeenCalled();
+
+    // And the real stored state is untouched by the refused attempt.
+    expect((await getEntitlement(user.id)).plan).toBe("pro");
+  });
+});
+
 describe("10. Subscription cancellation is handled correctly", () => {
   it("a customer.subscription.updated event with status canceled really updates the stored row", async () => {
     const { user } = await makeUser("scenario10@example.com");
     const activeSub = stripeSubscription({ metadata: { ownerId: user.id } });
     subscriptionsRetrieveMock.mockResolvedValue(activeSub);
+    const scenario10BaseCreated = Math.floor(Date.now() / 1000);
     constructEventMock.mockReturnValue({
       id: "evt_scenario10a",
       type: "checkout.session.completed",
+      created: scenario10BaseCreated,
       data: { object: { mode: "subscription", subscription: activeSub.id } },
     });
     await webhookPost(webhookRequest({}));
@@ -362,6 +405,9 @@ describe("10. Subscription cancellation is handled correctly", () => {
     constructEventMock.mockReturnValue({
       id: "evt_scenario10b",
       type: "customer.subscription.updated",
+      // Later than 10a's — otherwise the new stale/out-of-order guard would
+      // correctly (and, for this test, unhelpfully) ignore the cancellation.
+      created: scenario10BaseCreated + 10,
       data: { object: canceledSub },
     });
     const res = await webhookPost(webhookRequest({}));
@@ -377,9 +423,11 @@ describe("11. Expired/canceled subscription loses premium access", () => {
     const { user, project } = await makeUser("scenario11@example.com");
     const activeSub = stripeSubscription({ metadata: { ownerId: user.id } });
     subscriptionsRetrieveMock.mockResolvedValue(activeSub);
+    const scenario11BaseCreated = Math.floor(Date.now() / 1000);
     constructEventMock.mockReturnValue({
       id: "evt_scenario11a",
       type: "checkout.session.completed",
+      created: scenario11BaseCreated,
       data: { object: { mode: "subscription", subscription: activeSub.id } },
     });
     await webhookPost(webhookRequest({}));
@@ -393,6 +441,7 @@ describe("11. Expired/canceled subscription loses premium access", () => {
     constructEventMock.mockReturnValue({
       id: "evt_scenario11b",
       type: "customer.subscription.updated",
+      created: scenario11BaseCreated + 10, // later than 11a's — see scenario 10's comment
       data: { object: canceledSub },
     });
     await webhookPost(webhookRequest({}));

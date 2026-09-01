@@ -33,3 +33,11 @@ if (process.env.NODE_ENV !== "production") {
 }
 
 export const db = drizzle(client, { schema });
+
+// Accepts either the base db instance or the transaction-scoped object
+// db.transaction()'s callback receives — for functions (entitlements.ts's
+// getEntitlement/sumCommittedCostCentsSince) that need to run either
+// standalone OR as part of a caller's own transaction (jobs.ts's
+// requestJob, closing the credit-check race — see its own comment), so the
+// same read logic isn't duplicated across an advisory-lock boundary.
+export type DbClient = typeof db | Parameters<Parameters<typeof db.transaction>[0]>[0];

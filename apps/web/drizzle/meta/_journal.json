@@ -148,6 +148,13 @@
       "when": 1788219982219,
       "tag": "0020_windy_shotgun",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1788227043838,
+      "tag": "0021_legal_masque",
+      "breakpoints": true
     }
   ]
 }

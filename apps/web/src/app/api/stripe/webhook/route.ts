@@ -2,7 +2,7 @@ import type Stripe from "stripe";
 import { eq } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { db } from "@/db";
-import { subscriptions } from "@/db/schema";
+import { stripeWebhookEvents, subscriptions } from "@/db/schema";
 import { getPlanIdForStripePriceId, getStripeClient, isStripeConfigured } from "@/lib/stripe";
 
 // Stripe calls this directly — no session cookie, no CSRF token, nothing
@@ -54,12 +54,36 @@ async function resolveOwnerId(subscription: Stripe.Subscription): Promise<string
  * anything. Whether Stripe cancels immediately or at period end is a
  * Customer Portal dashboard setting, not something this code controls —
  * see STRIPE.md.
+ *
+ * `eventCreatedAt` is the wrapping Stripe *event's* `created` timestamp
+ * (unix seconds), not read from `subscription` itself — Stripe explicitly
+ * documents at-least-once, NOT necessarily ordered, webhook delivery. Before
+ * writing, this compares against the target row's own
+ * `lastStripeEventCreatedAt`; an incoming event no newer than what's already
+ * applied is stale (delivered out of order) and is skipped rather than
+ * overwriting newer state with older state — e.g. an "active" event queued
+ * before a cancellation, delivered after it.
  */
-async function upsertSubscriptionFromStripe(subscription: Stripe.Subscription): Promise<void> {
+async function upsertSubscriptionFromStripe(subscription: Stripe.Subscription, eventCreatedAt: number): Promise<void> {
   const ownerId = await resolveOwnerId(subscription);
   if (!ownerId) {
     console.error(
       `[stripe webhook] could not resolve an owner for subscription ${subscription.id} (customer ${String(subscription.customer)}) — skipping.`,
+    );
+    return;
+  }
+
+  const eventCreatedAtDate = new Date(eventCreatedAt * 1000);
+
+  const [existingRow] = await db
+    .select({ lastStripeEventCreatedAt: subscriptions.lastStripeEventCreatedAt })
+    .from(subscriptions)
+    .where(eq(subscriptions.ownerId, ownerId))
+    .limit(1);
+  if (existingRow?.lastStripeEventCreatedAt && existingRow.lastStripeEventCreatedAt >= eventCreatedAtDate) {
+    console.warn(
+      `[stripe webhook] ignoring stale/out-of-order event for subscription ${subscription.id} (owner ${ownerId}) — ` +
+        `event created ${eventCreatedAtDate.toISOString()}, already applied one from ${existingRow.lastStripeEventCreatedAt.toISOString()}.`,
     );
     return;
   }
@@ -82,6 +106,7 @@ async function upsertSubscriptionFromStripe(subscription: Stripe.Subscription): 
     currentPeriodEnd: item?.current_period_end ? new Date(item.current_period_end * 1000) : null,
     cancelAtPeriodEnd: subscription.cancel_at_period_end,
     canceledAt: subscription.canceled_at ? new Date(subscription.canceled_at * 1000) : null,
+    lastStripeEventCreatedAt: eventCreatedAtDate,
     updatedAt: new Date(),
   };
 
@@ -91,12 +116,28 @@ async function upsertSubscriptionFromStripe(subscription: Stripe.Subscription): 
     .onConflictDoUpdate({ target: subscriptions.ownerId, set: values });
 }
 
-async function handleSubscriptionDeleted(subscription: Stripe.Subscription): Promise<void> {
+async function handleSubscriptionDeleted(subscription: Stripe.Subscription, eventCreatedAt: number): Promise<void> {
   const ownerId = await resolveOwnerId(subscription);
   if (!ownerId) {
     console.error(`[stripe webhook] could not resolve an owner for deleted subscription ${subscription.id} — skipping.`);
     return;
   }
+
+  const eventCreatedAtDate = new Date(eventCreatedAt * 1000);
+
+  // Same staleness guard as upsertSubscriptionFromStripe — see its comment.
+  const [existingRow] = await db
+    .select({ lastStripeEventCreatedAt: subscriptions.lastStripeEventCreatedAt })
+    .from(subscriptions)
+    .where(eq(subscriptions.ownerId, ownerId))
+    .limit(1);
+  if (existingRow?.lastStripeEventCreatedAt && existingRow.lastStripeEventCreatedAt >= eventCreatedAtDate) {
+    console.warn(
+      `[stripe webhook] ignoring stale/out-of-order deletion event for subscription ${subscription.id} (owner ${ownerId}).`,
+    );
+    return;
+  }
+
   // Fully deleted (not just canceled-at-period-end pending) — reset plan
   // to free outright rather than leaving a stale plan id next to a
   // "canceled" status; getEntitlement() would compute the same effective
@@ -108,6 +149,7 @@ async function handleSubscriptionDeleted(subscription: Stripe.Subscription): Pro
       status: subscription.status,
       cancelAtPeriodEnd: false,
       canceledAt: subscription.canceled_at ? new Date(subscription.canceled_at * 1000) : new Date(),
+      lastStripeEventCreatedAt: eventCreatedAtDate,
       updatedAt: new Date(),
     })
     .where(eq(subscriptions.ownerId, ownerId));
@@ -140,6 +182,24 @@ export async function POST(request: Request): Promise<Response> {
     return NextResponse.json({ error: "Invalid signature." }, { status: 400 });
   }
 
+  // Stripe's delivery guarantee is at-least-once, not exactly-once — a slow
+  // 200, a network blip, or a manual resend from the Dashboard can all
+  // redeliver the same event id. Checked BEFORE doing any state-changing
+  // work, but only recorded as done AFTER the switch below succeeds (see
+  // the bottom of this function) — recording it up front would mean a
+  // request that fails partway (returns 500 so Stripe retries) gets
+  // wrongly treated as "already handled" on the retry, silently dropping a
+  // real subscription-state change instead of ever actually applying it.
+  const [alreadyProcessed] = await db
+    .select({ id: stripeWebhookEvents.id })
+    .from(stripeWebhookEvents)
+    .where(eq(stripeWebhookEvents.id, event.id))
+    .limit(1);
+  if (alreadyProcessed) {
+    console.warn(`[stripe webhook] duplicate delivery of event ${event.id} (${event.type}) — already processed, skipping.`);
+    return NextResponse.json({ received: true, duplicate: true });
+  }
+
   try {
     switch (event.type) {
       case "checkout.session.completed": {
@@ -149,16 +209,16 @@ export async function POST(request: Request): Promise<Response> {
         }
         const subscriptionId = typeof session.subscription === "string" ? session.subscription : session.subscription.id;
         const subscription = await getStripeClient().subscriptions.retrieve(subscriptionId);
-        await upsertSubscriptionFromStripe(subscription);
+        await upsertSubscriptionFromStripe(subscription, event.created);
         break;
       }
       case "customer.subscription.created":
       case "customer.subscription.updated": {
-        await upsertSubscriptionFromStripe(event.data.object);
+        await upsertSubscriptionFromStripe(event.data.object, event.created);
         break;
       }
       case "customer.subscription.deleted": {
-        await handleSubscriptionDeleted(event.data.object);
+        await handleSubscriptionDeleted(event.data.object, event.created);
         break;
       }
       // invoice.payment_failed isn't handled separately — Stripe's own
@@ -174,8 +234,26 @@ export async function POST(request: Request): Promise<Response> {
   } catch (err) {
     console.error(`[stripe webhook] failed to handle event ${event.type} (${event.id})`, err);
     // 500 so Stripe retries delivery — a transient DB error here shouldn't
-    // silently drop a subscription state change.
+    // silently drop a subscription state change. Deliberately NOT recorded
+    // as processed below, so the retry actually reprocesses it.
     return NextResponse.json({ error: "Internal error handling webhook." }, { status: 500 });
+  }
+
+  // Only recorded once the switch above has actually succeeded — see the
+  // comment at the top of this function for why recording it earlier would
+  // be wrong. onConflictDoNothing rather than a plain insert: two
+  // deliveries of the same event racing past the check above and both
+  // reaching here is a harmless, extremely unlikely edge case (every
+  // handler above is itself an idempotent upsert of the same final state),
+  // not one worth failing the response over.
+  try {
+    await db.insert(stripeWebhookEvents).values({ id: event.id, type: event.type }).onConflictDoNothing();
+  } catch (err) {
+    // The actual subscription state change above already succeeded — never
+    // turn that into a 500 (and a needless Stripe retry) over failing to
+    // record this bookkeeping marker. Worst case, a future redelivery gets
+    // reprocessed instead of skipped, which is safe for the same reason.
+    console.error(`[stripe webhook] failed to record processed event id ${event.id}`, err);
   }
 
   return NextResponse.json({ received: true });

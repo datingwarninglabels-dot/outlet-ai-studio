@@ -46,6 +46,37 @@ fire `customer.subscription.updated`. Access is authorized by checking that
 status (see "How access is enforced" below), not by listening for
 `invoice.payment_failed` separately.
 
+**Idempotency and delivery-order protection.** Stripe's own delivery
+guarantee is at-least-once, not exactly-once, and explicitly does not
+guarantee events arrive in order. This handler defends against both:
+
+- Every event id is recorded (`stripe_webhook_event` table) once it's been
+  successfully handled; a redelivery of the same event id is detected and
+  skipped before any state-changing work runs.
+- Each `subscription` row tracks the `created` timestamp of the last event
+  actually applied to it (`lastStripeEventCreatedAt`). An incoming event no
+  newer than that is treated as stale/out-of-order and ignored — otherwise
+  an older "active" event delivered after a newer "canceled" one could
+  silently restore access after a legitimate cancellation.
+
+## Changing plans for an already-subscribed customer
+
+`createCheckoutSession` refuses (`AlreadySubscribedError`) to start a new
+Checkout Session for an owner who already has real, active/trialing paid
+access — Checkout always creates a **brand-new** subscription, never
+modifies an existing one, so allowing it here would leave a customer with
+two separate subscriptions on the same Stripe customer, both billing,
+with only one ever reflected in this app's `subscription` row. That case
+is routed to the Billing Portal instead (`billing/actions.ts`'s
+`startCheckout` catches the error and redirects there).
+
+**This means "Update subscription" must be enabled in the Stripe
+Dashboard** (Settings → Billing → Customer portal → Products) for an
+existing customer to actually be able to switch plans — without it, the
+Portal will only offer payment-method/invoice management, not a plan
+switcher. Enable it and select which Prices (Pro, Studio) a customer can
+switch between before relying on in-app plan changes.
+
 ## Credits
 
 A credit is defined as **one cent of real provider cost**, using the same
@@ -91,6 +122,14 @@ the request. The client never decides this; it only reacts to
 `PaywallError`'s message by rendering the `<Paywall />` component instead of
 a plain error.
 
+The credit check and the job/usage-cost rows it gates run inside one
+database transaction, behind a per-owner Postgres advisory lock
+(`pg_advisory_xact_lock`) — without this, two concurrent requests near the
+credit ceiling (two tabs, a scripted burst) could each pass the check
+before either commits, together exceeding the plan's allowance. Same
+pattern this codebase already uses for the `/setup` bootstrap-account
+race (see `setup/actions.ts`), just keyed per-owner instead of globally.
+
 **Whether Stripe cancels a subscription immediately or at the end of the
 billing period when someone cancels from the Billing Portal is a Stripe
 Dashboard setting**, not something this app's code controls — see
@@ -100,14 +139,32 @@ status, this app's access check reflects that immediately.
 
 ## What's verified vs. not
 
-- `npx tsc --noEmit`, `npm run lint`, `npm test`, and `npm run build` all
-  pass with this code in place (see the implementation summary for exact
-  results).
-- **Not verified**: an actual Stripe test-mode Checkout completing, a real
-  webhook delivery, or any of this against a live database — no reachable
-  database or real Stripe account exists in the environment this was built
-  in (the same limitation noted throughout this project's `PLAN.md` for
-  every prior milestone). Before relying on this in production: run a real
-  test-mode Checkout end to end, confirm the webhook actually updates the
-  `subscription` row, and confirm a canceled/failed subscription actually
-  loses access.
+- `npx tsc --noEmit`, `npm run lint`, `npm test` (184 tests, including a
+  real-database billing E2E suite — see `BILLING_E2E_TEST_REPORT.md`), and
+  `npm run build` all pass with this code in place.
+- The webhook's signature-verified event handling, entitlement computation,
+  cancellation/expiry access loss, event dedup, and stale/out-of-order
+  event rejection are all verified against a real database (PGlite) in
+  `apps/web/src/test/billing-e2e.test.ts` and `route.test.ts`. Only the
+  Stripe SDK's own network client is mocked — no real Stripe account is
+  reachable in this environment.
+- **Not independently verified: the per-owner advisory-lock fix for the
+  credit-check race.** The fix itself (transaction + `pg_advisory_xact_lock`,
+  same primitive and pattern as the existing `/setup` bootstrap-lock fix)
+  is correct by construction, and the full suite still passes with it in
+  place — but PGlite processes `db.transaction()` calls fully serially
+  regardless of locking, so no automated test run here can actually
+  demonstrate two requests interleaving the way they would against a real
+  multi-connection Postgres. Confirmed this empirically (a probe transaction
+  never overlaps a second one under PGlite) before choosing not to ship a
+  concurrency test that would pass identically whether the fix worked or
+  not.
+- **Still not verified**: an actual Stripe test-mode Checkout completing, a
+  real webhook delivery from Stripe itself, or the Billing Portal's
+  "Update subscription" flow actually working end to end — no reachable
+  live Stripe account exists in this environment. Before relying on this in
+  production: run a real test-mode Checkout, confirm the webhook actually
+  updates the `subscription` row, confirm a canceled/failed subscription
+  actually loses access, and confirm an already-subscribed test customer is
+  correctly routed to a working plan-switcher in the Billing Portal (after
+  enabling "Update subscription" — see above).

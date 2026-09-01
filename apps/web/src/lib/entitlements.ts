@@ -1,5 +1,5 @@
 import { and, eq, gte, isNotNull, sql } from "drizzle-orm";
-import { db } from "@/db";
+import { db, type DbClient } from "@/db";
 import { subscriptions, usageCosts } from "@/db/schema";
 import { PAYWALL_MESSAGE } from "@/lib/paywall-message";
 
@@ -80,8 +80,8 @@ function startOfCurrentCalendarMonth(): Date {
  * its estimate rather than $0 — worth revisiting if partial-failure
  * refunds ever matter).
  */
-async function sumCommittedCostCentsSince(ownerId: string, since: Date): Promise<number> {
-  const [row] = await db
+async function sumCommittedCostCentsSince(ownerId: string, since: Date, dbClient: DbClient = db): Promise<number> {
+  const [row] = await dbClient
     .select({
       total: sql<string>`coalesce(sum(coalesce(${usageCosts.actualCostCents}, ${usageCosts.estimatedCostCents})), 0)`,
     })
@@ -96,9 +96,15 @@ async function sumCommittedCostCentsSince(ownerId: string, since: Date): Promise
  * page, the paywall component) goes through this rather than reading
  * `subscriptions.plan` directly, so the active-status check can never be
  * accidentally skipped somewhere.
+ *
+ * Optional `dbClient` lets a caller run this inside its OWN transaction
+ * (see requireCredits below) instead of always querying through the
+ * module-level pooled `db` — needed so a credit check and the job/usage
+ * row it gates can be made atomic under one advisory lock, rather than two
+ * independent round trips a concurrent request could race between.
  */
-export async function getEntitlement(ownerId: string): Promise<Entitlement> {
-  const [sub] = await db.select().from(subscriptions).where(eq(subscriptions.ownerId, ownerId)).limit(1);
+export async function getEntitlement(ownerId: string, dbClient: DbClient = db): Promise<Entitlement> {
+  const [sub] = await dbClient.select().from(subscriptions).where(eq(subscriptions.ownerId, ownerId)).limit(1);
 
   const rawPlan = (sub?.plan as PlanId | undefined) ?? "free";
   const hasActivePaidStatus = sub?.status ? ACTIVE_STRIPE_STATUSES.has(sub.status) : false;
@@ -110,7 +116,7 @@ export async function getEntitlement(ownerId: string): Promise<Entitlement> {
   const periodStart = sub?.currentPeriodStart ?? startOfCurrentCalendarMonth();
   const periodEnd = sub?.currentPeriodEnd ?? null;
 
-  const usedCreditCentsThisCycle = await sumCommittedCostCentsSince(ownerId, periodStart);
+  const usedCreditCentsThisCycle = await sumCommittedCostCentsSince(ownerId, periodStart, dbClient);
   const monthlyCreditCents = getPlanLimits()[plan].monthlyCreditCents;
 
   return {
@@ -147,9 +153,14 @@ export class PaywallError extends Error {
  * choke point every generation type already funnels through (see
  * lib/jobs.ts) — so this is enforced consistently everywhere, not
  * per-feature. Server-side only: the client never decides this.
+ *
+ * Accepts an optional `dbClient` so requestJob can pass its own
+ * transaction — see requestJob's comment for why this check being a bare,
+ * separate round trip from the job/usage-row insert would let two
+ * concurrent requests both pass it before either commits.
  */
-export async function requireCredits(ownerId: string, costCents: number): Promise<void> {
-  const entitlement = await getEntitlement(ownerId);
+export async function requireCredits(ownerId: string, costCents: number, dbClient: DbClient = db): Promise<void> {
+  const entitlement = await getEntitlement(ownerId, dbClient);
   if (entitlement.remainingCreditCents < costCents) {
     throw new PaywallError(entitlement);
   }

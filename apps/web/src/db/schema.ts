@@ -588,6 +588,17 @@ export const subscriptions = pgTable(
     currentPeriodEnd: timestamp("current_period_end"),
     cancelAtPeriodEnd: boolean("cancel_at_period_end").notNull().default(false),
     canceledAt: timestamp("canceled_at"),
+    // The Stripe *event's* `created` timestamp (not this row's own
+    // updatedAt) of the last webhook event actually applied here. Stripe
+    // explicitly documents at-least-once, NOT necessarily ordered, webhook
+    // delivery — without this, an older "active" event delivered after a
+    // newer "canceled" event (a real, documented possibility, not a
+    // theoretical one) would silently overwrite newer state with stale
+    // state. Null means no event has been applied yet (pre-migration rows,
+    // or a row created only via getOrCreateStripeCustomerId with no webhook
+    // yet) — always apply in that case. See upsertSubscriptionFromStripe's
+    // staleness check in api/stripe/webhook/route.ts.
+    lastStripeEventCreatedAt: timestamp("last_stripe_event_created_at"),
     createdAt: timestamp("created_at").notNull().defaultNow(),
     updatedAt: timestamp("updated_at").notNull().defaultNow(),
   },
@@ -596,6 +607,21 @@ export const subscriptions = pgTable(
     index("subscription_stripe_subscription_id_idx").on(table.stripeSubscriptionId),
   ],
 );
+
+// One row per processed Stripe webhook event id — Stripe's own delivery
+// guarantee is at-least-once, so the same event can arrive more than once
+// (a retry after a slow 200, a dashboard-triggered resend, etc.). The
+// webhook handler inserts the event's id here with onConflictDoNothing
+// BEFORE doing any state-changing work; a conflict means this exact event
+// was already processed, so the handler short-circuits rather than
+// re-applying it. createdAt is this table's own insert time (for cleanup/
+// inspection), not the Stripe event's timestamp — see
+// subscription.lastStripeEventCreatedAt for that.
+export const stripeWebhookEvents = pgTable("stripe_webhook_event", {
+  id: text("id").primaryKey(),
+  type: text("type").notNull(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
 
 // Generic, cross-cutting rate-limit tracking — one row per attempt. `key`
 // is always a salted hash (an email or IP), never a raw identifier, same

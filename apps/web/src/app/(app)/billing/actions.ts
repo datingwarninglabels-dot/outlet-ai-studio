@@ -7,7 +7,7 @@ import { db } from "@/db";
 import { subscriptions } from "@/db/schema";
 import { getPlan, type PlanId } from "@/lib/plans";
 import { SITE_URL } from "@/lib/site-config";
-import { createBillingPortalSession, createCheckoutSession, isStripeConfigured } from "@/lib/stripe";
+import { AlreadySubscribedError, createBillingPortalSession, createCheckoutSession, isStripeConfigured } from "@/lib/stripe";
 
 export type BillingActionState = { error: string };
 
@@ -16,6 +16,18 @@ export type BillingActionState = { error: string };
  * from the client beyond which plan was clicked. The actual entitlement
  * only ever changes once Stripe's webhook confirms payment (see
  * api/stripe/webhook/route.ts); this action doesn't grant anything itself.
+ *
+ * Checkout (mode: "subscription") always creates a BRAND NEW Stripe
+ * subscription — it never modifies an existing one. createCheckoutSession
+ * refuses (throwing AlreadySubscribedError) for an owner who already has
+ * active/trialing paid access, specifically to prevent ending up with two
+ * separate subscriptions on the same Stripe customer, both billing, with
+ * this app's `subscription` row (one per owner) only ever able to reflect
+ * whichever webhook landed last — the other would keep charging, silently,
+ * forever. That case is routed to the Billing Portal instead, which
+ * updates the EXISTING subscription's price (requires "Update subscription"
+ * enabled under Settings → Billing → Customer portal in the Stripe
+ * Dashboard — see STRIPE.md).
  */
 export async function startCheckout(_prev: BillingActionState, formData: FormData): Promise<BillingActionState> {
   const session = await auth();
@@ -51,6 +63,14 @@ export async function startCheckout(_prev: BillingActionState, formData: FormDat
       cancelUrl: `${SITE_URL}/billing?checkout=cancelled`,
     });
   } catch (err) {
+    if (err instanceof AlreadySubscribedError) {
+      // openBillingPortal() redirects on its own (including its
+      // no-customer-yet edge case, which shouldn't be reachable here since
+      // AlreadySubscribedError only throws when a subscription row already
+      // exists), so its throw propagates exactly like the redirect below.
+      await openBillingPortal();
+      return { error: "" }; // unreachable — kept explicit, see redirect()'s never-return note elsewhere in this file
+    }
     console.error("[billing] failed to create checkout session", err);
     return { error: "Something went wrong starting checkout. Please try again." };
   }

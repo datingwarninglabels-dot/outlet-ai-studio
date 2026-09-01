@@ -3,7 +3,7 @@
 // after a successful sign-in). Centralized so both sides agree on what
 // counts as "safe" — an unvalidated callbackUrl is a classic open-redirect
 // vector (e.g. "https://evil.example" or "//evil.example").
-const DISALLOWED_TARGETS = new Set(["/login", "/setup"]);
+const DISALLOWED_TARGETS = new Set(["/login", "/setup", "/register"]);
 
 export function sanitizeCallbackUrl(raw: string | null | undefined): string {
   if (!raw) {

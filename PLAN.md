@@ -571,10 +571,92 @@ this later; the short version is captured in the milestones below.
     1) — this is a real gap, not an oversight, and should be closed with
     an integration test (or a mocked-db unit test) before public launch.
 
-Remaining Phase 2 milestones (customer auth/roles, authorization re-audit,
-entitlements/credit ledger, Stripe, public/policy pages, cost/abuse
-controls, monitoring/ops docs, full test matrix, launch checklist) are not
-yet started.
+- **Milestone 2 — customer auth** *(done, not deployed)*: turned the
+  single-Owner private tool into a real multi-tenant product — open
+  self-service customer registration, with an Owner role reserved for the
+  original platform-operator account and gated to admin-only screens.
+  Research before writing code found the data layer was mostly already
+  ready for this: `projects`, `characters`, `worlds`, and `brandKits` all
+  already had a real `ownerId` column, correctly enforced via
+  `lib/authz.ts`'s `loadOwnedProject`/`loadOwnedCharacter`/`loadOwnedWorld`
+  helpers.
+  - **Closed a real, self-documented gap first, as its own unit**:
+    `media_asset` had no ownership column at all — its own code comment
+    already called this out as a "security review finding," inert only
+    because exactly one account could ever exist. Added `ownerId` (schema
+    + migration `0016_slow_wolf_cub.sql`, hand-edited from drizzle-kit's
+    raw output into a safe nullable-add → backfill-to-the-sole-Owner →
+    `NOT NULL` sequence, since the raw generated migration would have
+    failed against any database with existing rows), a new
+    `loadOwnedMediaAsset` helper, and populated it at all 12 insert sites
+    across the app and every Trigger.dev job executor (adding a project
+    lookup, with a "project no longer exists" failure path, to three
+    executors — `voice.ts`, `animation.ts`, `assembly.ts` — that didn't
+    previously fetch one). `media-library/actions.ts`'s indirect
+    "list every row, filter by owned-project-ids" pattern was replaced
+    with a direct `ownerId` filter — simpler and correct at once.
+  - **Wired the previously-dormant `users.role` column into real
+    authorization**: flipped its default from `"owner"` to `"customer"`
+    (migration `0017_wandering_onslaught.sql`, metadata-only — every row
+    that can already exist sets `role` explicitly, so no existing account
+    is affected); added a `jwt` callback (`auth.ts`) to stamp role onto
+    the session token at sign-in (JWT-strategy sessions mean this is the
+    only point role data enters the session — a role change takes effect
+    on next sign-in, not live, which is an accepted limitation given roles
+    are set once at account creation); gated Provider Hub (platform-wide
+    spend and provider config — confirmed never customer-facing during
+    the landing page's copy audit) both centrally in
+    `auth.config.ts`'s `authorized` callback and again at the page level
+    as defense-in-depth; filtered it out of the rendered nav for
+    non-Owner sessions.
+  - **Public registration**: new `/register` route modeled directly on
+    `/setup` and `/login`'s existing patterns — honeypot + submit-timing
+    bot check (same cheap mechanism as the waitlist form, not a new one),
+    `bcrypt.hash(password, 12)` matching `/setup`'s cost factor, role set
+    to `"customer"` explicitly. A duplicate email returns a friendly
+    message (checks the Postgres `23505` unique-violation code
+    specifically, so a genuine DB failure isn't mislabeled as "email
+    taken"). No advisory lock needed here, unlike `/setup` — a duplicate
+    email is a normal conflict, not the "exactly one Owner" invariant.
+    Deliberately **not built**: any email-verification flow
+    (`users.emailVerified` stays unread everywhere, same as today's sole
+    Owner account — no transactional-email provider exists yet, so faking
+    verification would be dishonest) and any rate-limiting/CAPTCHA beyond
+    the cheap bot check (that's the separate, still-unstarted "cost/abuse
+    controls" milestone below).
+  - **Google sign-in** was previously blocked for any email not already
+    in `users` ("single-Owner app, no public sign-up"). Since open
+    registration is now the model, that blocking `signIn` callback was
+    removed entirely — a new Google email now falls through to the
+    DrizzleAdapter's normal "create user on first OAuth sign-in" path,
+    correctly landing on the `role` column's new `"customer"` default.
+  - Confirmed (by reading the code directly, not assumed): Character
+    Library, World Library, and Brand Kit were already genuinely
+    per-customer — no change needed beyond the incidental `ownerId`
+    backfill on their reference-image rows. `settings/page.tsx` and
+    `dashboard/page.tsx` already worked correctly per-session-user;
+    `settings` got an "Owner" → "Account" copy tweak only.
+  - **Explicitly out of scope for this milestone** (do not assume any of
+    this exists): billing/Stripe, subscription tables, Checkout; an AI
+    credit ledger/entitlements (`usage_costs` stays per-job only); the
+    marketing page's `CTA_MODE` flip from `"waitlist"` to `"registration"`
+    (`primaryCtaHref()` already returns `/register` for that mode — the
+    flip itself is a one-line, later, launch-timing decision, not an
+    engineering dependency); session/device management; 2FA.
+  - Verified: `npm run build` (route table shows `/register` as a new
+    dynamic route, no regressions), `npm run lint`, `npx tsc --noEmit`,
+    and `npm test` (125/125, including new mocked-DB tests for
+    `registerCustomer` covering validation, the honeypot/timing bot
+    checks, the success path, duplicate-email handling via the Postgres
+    error code, and DB-failure recovery). **Not live-tested** — same "no
+    DB reachable in this environment" constraint as every other milestone
+    this project has hit; both migrations are generated, hand-reviewed,
+    and committed, but not applied anywhere.
+
+Remaining Phase 2 milestones (authorization re-audit beyond what
+Milestone 2 covered, entitlements/credit ledger, Stripe, public/policy
+pages, cost/abuse controls, monitoring/ops docs, full test matrix, launch
+checklist) are not yet started.
 
 ## Credentials needed (not all at once — per milestone)
 

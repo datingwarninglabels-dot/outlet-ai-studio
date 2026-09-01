@@ -17,9 +17,13 @@ describe("PLANS — landing page's single source of pricing/entitlement truth", 
     }
   });
 
-  it("names a Stripe price env var per plan, ready for the future mapping, without reading it yet", () => {
+  it("names a Stripe price env var for every paid plan (free has none — there's nothing to check out)", () => {
     for (const plan of PLANS) {
-      expect(plan.stripePriceEnvVar.length).toBeGreaterThan(0);
+      if (plan.id === "free") {
+        expect(plan.stripePriceEnvVar).toBeNull();
+      } else {
+        expect(plan.stripePriceEnvVar).toBeTruthy();
+      }
     }
   });
 

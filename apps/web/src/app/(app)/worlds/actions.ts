@@ -172,6 +172,7 @@ export async function uploadReference(_prev: ActionState, formData: FormData): P
   const [asset] = await db
     .insert(mediaAssets)
     .values({
+      ownerId: world.ownerId,
       projectId: null,
       type: "world_reference",
       storageKey: uploaded.key,
@@ -261,15 +262,20 @@ async function requestWorldImages(
     };
   }
 
-  await requestJob({
-    worldId: world.id,
-    type: "world_images",
-    provider: imageProvider.name,
-    model: null,
-    idempotencyKey,
-    params: { worldId: world.id, views },
-    estimatedCostCents: views.length * estimateImageCostCents(imageProvider.name),
-  });
+  try {
+    await requestJob({
+      ownerId: userId,
+      worldId: world.id,
+      type: "world_images",
+      provider: imageProvider.name,
+      model: null,
+      idempotencyKey,
+      params: { worldId: world.id, views },
+      estimatedCostCents: views.length * estimateImageCostCents(imageProvider.name),
+    });
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Something went wrong. Please try again." };
+  }
 
   revalidatePath(`/worlds/${world.id}`);
   return { error: "" };

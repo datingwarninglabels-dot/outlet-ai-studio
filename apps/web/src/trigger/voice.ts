@@ -1,6 +1,16 @@
+import { eq } from "drizzle-orm";
 import { db } from "@/db";
-import { generationJobs, mediaAssets } from "@/db/schema";
-import { completeJob, completeStep, failJob, failStep, publicErrorMessage, startStep, withRetry } from "@/lib/jobs";
+import { generationJobs, mediaAssets, projects } from "@/db/schema";
+import {
+  completeJob,
+  completeStep,
+  failJob,
+  failStep,
+  publicErrorMessage,
+  recordActualCostFromEstimate,
+  startStep,
+  withRetry,
+} from "@/lib/jobs";
 import { ttsProvider } from "@/lib/providers";
 import { storageProvider } from "@/lib/storage-instance";
 import { defineJobTask } from "./lib/job-task";
@@ -10,6 +20,13 @@ import { defineJobTask } from "./lib/job-task";
 type ProjectJob = typeof generationJobs.$inferSelect & { projectId: string };
 
 export async function executeVoiceJob(job: ProjectJob): Promise<string | null> {
+  const [projectRow] = await db.select().from(projects).where(eq(projects.id, job.projectId)).limit(1);
+  if (!projectRow) {
+    const msg = "This project no longer exists.";
+    await failJob(job.id, msg, msg);
+    return msg;
+  }
+
   const stepId = await startStep(job.id, "generate_voice", 0);
 
   try {
@@ -24,6 +41,7 @@ export async function executeVoiceJob(job: ProjectJob): Promise<string | null> {
     });
 
     await db.insert(mediaAssets).values({
+      ownerId: projectRow.ownerId,
       projectId: job.projectId,
       jobId: job.id,
       type: "voice_audio",
@@ -36,6 +54,7 @@ export async function executeVoiceJob(job: ProjectJob): Promise<string | null> {
     });
 
     await completeStep(stepId, { characterCount: result.characterCount, sizeBytes: uploaded.sizeBytes });
+    await recordActualCostFromEstimate(job.id);
     await completeJob(job.id);
     return null;
   } catch (err) {

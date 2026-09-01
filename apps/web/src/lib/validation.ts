@@ -11,6 +11,16 @@ export const setupSchema = z.object({
   password: z.string().min(12),
 });
 
+export const registerSchema = z.object({
+  name: z.string().min(1).max(100),
+  email: z.string().email(),
+  // Matches setupSchema's bar, not loginSchema's weaker one — this creates
+  // an account, same as /setup does.
+  password: z.string().min(12),
+  // Honeypot — same pattern as waitlistSchema.
+  website: z.string().max(0).optional(),
+});
+
 export const CREATOR_TYPES = [
   "Faceless content creator",
   "YouTube / YouTube Shorts",

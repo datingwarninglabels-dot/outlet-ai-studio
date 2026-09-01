@@ -151,6 +151,7 @@ export async function uploadReference(_prev: ActionState, formData: FormData): P
   const [asset] = await db
     .insert(mediaAssets)
     .values({
+      ownerId: character.ownerId,
       projectId: null,
       type: "character_reference",
       storageKey: uploaded.key,
@@ -249,15 +250,20 @@ async function requestCharacterImages(
     };
   }
 
-  await requestJob({
-    characterId: character.id,
-    type: "character_images",
-    provider: imageProvider.name,
-    model: null,
-    idempotencyKey,
-    params: { characterId: character.id, views },
-    estimatedCostCents: views.length * estimateImageCostCents(imageProvider.name),
-  });
+  try {
+    await requestJob({
+      ownerId: userId,
+      characterId: character.id,
+      type: "character_images",
+      provider: imageProvider.name,
+      model: null,
+      idempotencyKey,
+      params: { characterId: character.id, views },
+      estimatedCostCents: views.length * estimateImageCostCents(imageProvider.name),
+    });
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Something went wrong. Please try again." };
+  }
 
   revalidatePath(`/characters/${character.id}`);
   return { error: "" };

@@ -20,6 +20,11 @@ export type StoryboardGenerationResult = {
   // the scenes (never throw away completed work) but tell the Owner so they
   // know to regenerate rather than assume the list is final.
   truncated: boolean;
+  // Real usage from the provider's response — used to record actual spend
+  // (see lib/cost-estimate.ts's computeGenerationCostCents), not just the
+  // pre-generation char-count estimate.
+  promptTokens: number;
+  completionTokens: number;
 };
 
 export interface StoryboardProvider {

@@ -6,7 +6,7 @@ import { revalidatePath } from "next/cache";
 import { auth } from "@/auth";
 import { db } from "@/db";
 import { mediaAssets, projects } from "@/db/schema";
-import { loadOwnedProject } from "@/lib/authz";
+import { loadOwnedMediaAsset, loadOwnedProject } from "@/lib/authz";
 import { MEDIA_CATEGORIES, type MediaCategoryKey } from "@/lib/media-categories";
 import { storageProvider } from "@/lib/storage-instance";
 
@@ -31,34 +31,6 @@ const TEXT_EXTENSIONS: Record<string, string[]> = {
   subtitle: ["srt", "vtt"],
 };
 
-/**
- * Security review finding: media_asset has no ownerId column (see the
- * table's own schema comment for why), so per-asset ownership can only be
- * verified when a row is tied to a project — every other action in this
- * app that resolves a resource by id (loadOwnedProject/loadOwnedCharacter/
- * loadOwnedWorld) does exactly this kind of check, and Media Library's
- * mutation/lookup actions were missing it. A project-less asset (character/
- * world reference, brand kit asset, standalone library upload) has no
- * per-owner boundary to check at all in the current schema — reachable by
- * construction only because this is a single-Owner, bootstrap-locked app
- * (see setup/actions.ts's advisory-lock fix, which is what actually keeps
- * that invariant true under concurrent requests).
- */
-async function assertAssetReachableByOwner(
-  asset: { projectId: string | null },
-  ownerId: string,
-): Promise<boolean> {
-  if (!asset.projectId) {
-    return true;
-  }
-  try {
-    await loadOwnedProject(asset.projectId, ownerId);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 export async function sweepExpiredTrash(): Promise<void> {
   const cutoff = new Date(Date.now() - RECOVERY_WINDOW_DAYS * 24 * 60 * 60 * 1000);
   const expired = await db
@@ -76,14 +48,6 @@ export async function sweepExpiredTrash(): Promise<void> {
   }
 }
 
-/**
- * ownerId is required (not just "an authenticated session exists") so a
- * projectId filter can be verified rather than trusted outright — see
- * assertAssetReachableByOwner's doc comment. An unowned projectId is
- * rejected rather than silently ignored, since silently falling back to
- * "show everything" would be a worse failure mode for a filter the caller
- * explicitly asked for.
- */
 export async function listMediaAssets(
   ownerId: string,
   filters: { projectId?: string; category?: string },
@@ -92,7 +56,7 @@ export async function listMediaAssets(
     await loadOwnedProject(filters.projectId, ownerId);
   }
 
-  const conditions = [isNull(mediaAssets.deletedAt)];
+  const conditions = [eq(mediaAssets.ownerId, ownerId), isNull(mediaAssets.deletedAt)];
   if (filters.projectId) {
     conditions.push(eq(mediaAssets.projectId, filters.projectId));
   }
@@ -102,34 +66,18 @@ export async function listMediaAssets(
     .where(and(...conditions))
     .orderBy(desc(mediaAssets.createdAt));
 
-  let reachable = rows;
-  if (!filters.projectId) {
-    // Batch the ownership check instead of one query per row: fetch this
-    // owner's project ids once, then a row is reachable if it has no
-    // project (see assertAssetReachableByOwner) or its project is in that set.
-    const ownedProjectIds = new Set(
-      (await db.select({ id: projects.id }).from(projects).where(eq(projects.ownerId, ownerId))).map((p) => p.id),
-    );
-    reachable = rows.filter((r) => !r.projectId || ownedProjectIds.has(r.projectId));
-  }
-
   if (!filters.category) {
-    return reachable;
+    return rows;
   }
-  return reachable.filter((r) => (r.metadata as { category?: string } | null)?.category === filters.category);
+  return rows.filter((r) => (r.metadata as { category?: string } | null)?.category === filters.category);
 }
 
 export async function listTrashedMediaAssets(ownerId: string) {
-  const rows = await db
+  return db
     .select()
     .from(mediaAssets)
-    .where(isNotNull(mediaAssets.deletedAt))
+    .where(and(eq(mediaAssets.ownerId, ownerId), isNotNull(mediaAssets.deletedAt)))
     .orderBy(desc(mediaAssets.deletedAt));
-
-  const ownedProjectIds = new Set(
-    (await db.select({ id: projects.id }).from(projects).where(eq(projects.ownerId, ownerId))).map((p) => p.id),
-  );
-  return rows.filter((r) => !r.projectId || ownedProjectIds.has(r.projectId));
 }
 
 export async function getStorageUsage(ownerId: string): Promise<{
@@ -140,7 +88,6 @@ export async function getStorageUsage(ownerId: string): Promise<{
     eq(projects.ownerId, ownerId),
   );
   const titleById = new Map(ownedProjects.map((p) => [p.id, p.title]));
-  const ownedProjectIds = new Set(ownedProjects.map((p) => p.id));
 
   const rows = await db
     .select({
@@ -148,13 +95,12 @@ export async function getStorageUsage(ownerId: string): Promise<{
       sizeBytes: mediaAssets.sizeBytes,
     })
     .from(mediaAssets)
-    .where(isNull(mediaAssets.deletedAt));
+    .where(and(eq(mediaAssets.ownerId, ownerId), isNull(mediaAssets.deletedAt)));
 
-  const reachableRows = rows.filter((r) => !r.projectId || ownedProjectIds.has(r.projectId));
-  const totalBytes = reachableRows.reduce((sum, r) => sum + r.sizeBytes, 0);
+  const totalBytes = rows.reduce((sum, r) => sum + r.sizeBytes, 0);
 
   const byProjectId = new Map<string | null, number>();
-  for (const r of reachableRows) {
+  for (const r of rows) {
     byProjectId.set(r.projectId, (byProjectId.get(r.projectId) ?? 0) + r.sizeBytes);
   }
 
@@ -223,6 +169,7 @@ export async function uploadMedia(_prev: ActionState, formData: FormData): Promi
   });
 
   await db.insert(mediaAssets).values({
+    ownerId: session.user.id,
     projectId,
     type: "library_upload",
     storageKey: uploaded.key,
@@ -243,8 +190,9 @@ export async function renameMediaAsset(_prev: ActionState, formData: FormData): 
   }
 
   const mediaAssetId = String(formData.get("mediaAssetId") ?? "");
-  const [asset] = await db.select().from(mediaAssets).where(eq(mediaAssets.id, mediaAssetId)).limit(1);
-  if (!asset || !(await assertAssetReachableByOwner(asset, session.user.id))) {
+  try {
+    await loadOwnedMediaAsset(mediaAssetId, session.user.id);
+  } catch {
     return { error: "Media asset not found." };
   }
 
@@ -262,8 +210,9 @@ export async function updateMediaAssetTags(_prev: ActionState, formData: FormDat
   }
 
   const mediaAssetId = String(formData.get("mediaAssetId") ?? "");
-  const [asset] = await db.select().from(mediaAssets).where(eq(mediaAssets.id, mediaAssetId)).limit(1);
-  if (!asset || !(await assertAssetReachableByOwner(asset, session.user.id))) {
+  try {
+    await loadOwnedMediaAsset(mediaAssetId, session.user.id);
+  } catch {
     return { error: "Media asset not found." };
   }
 
@@ -293,8 +242,10 @@ export async function assignMediaAssetToProject(_prev: ActionState, formData: Fo
   }
 
   const mediaAssetId = String(formData.get("mediaAssetId") ?? "");
-  const [asset] = await db.select().from(mediaAssets).where(eq(mediaAssets.id, mediaAssetId)).limit(1);
-  if (!asset || !(await assertAssetReachableByOwner(asset, session.user.id))) {
+  let asset;
+  try {
+    asset = await loadOwnedMediaAsset(mediaAssetId, session.user.id);
+  } catch {
     return { error: "Media asset not found." };
   }
   if (asset.jobId || asset.sceneId) {
@@ -331,8 +282,13 @@ export async function trashMediaAsset(formData: FormData): Promise<void> {
     redirect("/login");
   }
   const mediaAssetId = String(formData.get("mediaAssetId") ?? "");
-  const [asset] = await db.select().from(mediaAssets).where(eq(mediaAssets.id, mediaAssetId)).limit(1);
-  if (!asset || asset.type !== "library_upload" || !(await assertAssetReachableByOwner(asset, session.user.id))) {
+  let asset;
+  try {
+    asset = await loadOwnedMediaAsset(mediaAssetId, session.user.id);
+  } catch {
+    return;
+  }
+  if (asset.type !== "library_upload") {
     return;
   }
   await db.update(mediaAssets).set({ deletedAt: new Date() }).where(eq(mediaAssets.id, mediaAssetId));
@@ -345,8 +301,9 @@ export async function restoreMediaAsset(formData: FormData): Promise<void> {
     redirect("/login");
   }
   const mediaAssetId = String(formData.get("mediaAssetId") ?? "");
-  const [asset] = await db.select().from(mediaAssets).where(eq(mediaAssets.id, mediaAssetId)).limit(1);
-  if (!asset || !(await assertAssetReachableByOwner(asset, session.user.id))) {
+  try {
+    await loadOwnedMediaAsset(mediaAssetId, session.user.id);
+  } catch {
     return;
   }
   await db.update(mediaAssets).set({ deletedAt: null }).where(eq(mediaAssets.id, mediaAssetId));
@@ -359,8 +316,10 @@ export async function permanentlyDeleteMediaAsset(formData: FormData): Promise<v
     redirect("/login");
   }
   const mediaAssetId = String(formData.get("mediaAssetId") ?? "");
-  const [asset] = await db.select().from(mediaAssets).where(eq(mediaAssets.id, mediaAssetId)).limit(1);
-  if (!asset || !(await assertAssetReachableByOwner(asset, session.user.id))) {
+  let asset;
+  try {
+    asset = await loadOwnedMediaAsset(mediaAssetId, session.user.id);
+  } catch {
     return;
   }
   try {
@@ -377,9 +336,6 @@ export async function getMediaAssetUrl(mediaAssetId: string): Promise<string> {
   if (!session?.user) {
     redirect("/login");
   }
-  const [asset] = await db.select().from(mediaAssets).where(eq(mediaAssets.id, mediaAssetId)).limit(1);
-  if (!asset || !(await assertAssetReachableByOwner(asset, session.user.id))) {
-    throw new Error("Media asset not found.");
-  }
+  const asset = await loadOwnedMediaAsset(mediaAssetId, session.user.id);
   return storageProvider.getSignedUrl(asset.storageKey);
 }

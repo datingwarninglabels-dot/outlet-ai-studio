@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { signIn } from "next-auth/react";
 
@@ -10,6 +10,14 @@ export function LoginForm({ callbackUrl }: { callbackUrl: string }) {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [pending, setPending] = useState(false);
+  const websiteRef = useRef<HTMLInputElement>(null);
+  // Ref, not state — see register-form.tsx's note on why a useState(() =>
+  // Date.now()) initializer would mismatch between server and client render.
+  const renderedAtRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    renderedAtRef.current = Date.now();
+  }, []);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -18,6 +26,8 @@ export function LoginForm({ callbackUrl }: { callbackUrl: string }) {
     const result = await signIn("credentials", {
       email,
       password,
+      website: websiteRef.current?.value ?? "",
+      renderedAt: renderedAtRef.current ?? 0,
       redirect: false,
     });
     setPending(false);
@@ -32,6 +42,13 @@ export function LoginForm({ callbackUrl }: { callbackUrl: string }) {
   return (
     <div className="flex flex-col gap-6">
       <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+        {/* Honeypot — hidden from real visitors via CSS, same pattern as
+            /register and the waitlist form. */}
+        <div className="h-0 w-0 overflow-hidden" aria-hidden="true">
+          <label htmlFor="website">Website</label>
+          <input id="website" ref={websiteRef} type="text" tabIndex={-1} autoComplete="off" />
+        </div>
+
         <div className="flex flex-col gap-1.5">
           <label htmlFor="email" className="text-sm text-muted">
             Email

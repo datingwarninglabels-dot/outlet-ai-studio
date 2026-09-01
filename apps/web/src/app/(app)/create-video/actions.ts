@@ -80,15 +80,20 @@ export async function requestScript(
     assumedOutputTokens: ASSUMED_OUTPUT_TOKENS,
   });
 
-  await requestJob({
-    projectId: project.id,
-    type: "script",
-    provider: scriptProvider.name,
-    model: SCRIPT_MODEL,
-    idempotencyKey,
-    params: parsed.data,
-    estimatedCostCents: estimate.cents,
-  });
+  try {
+    await requestJob({
+      ownerId: session.user.id,
+      projectId: project.id,
+      type: "script",
+      provider: scriptProvider.name,
+      model: SCRIPT_MODEL,
+      idempotencyKey,
+      params: parsed.data,
+      estimatedCostCents: estimate.cents,
+    });
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Something went wrong. Please try again." };
+  }
 
   redirect(`/projects/${project.id}`);
 }

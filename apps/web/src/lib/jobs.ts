@@ -1,8 +1,20 @@
 import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { generationJobs, jobSteps, usageCosts } from "@/db/schema";
+import { requireCredits } from "@/lib/entitlements";
+import { checkRateLimit } from "@/lib/rate-limit";
 
 export const STALL_THRESHOLD_MS = 5 * 60 * 1000;
+
+// Every generation request (script, storyboard, voice, visual, animation,
+// assembly, thumbnail, character/world images) funnels through requestJob
+// below — a single choke point to rate-limit real, billable provider calls
+// per account, rather than adding a check at each of the ~10 call sites.
+// Generous enough not to bother a real user working through a project
+// (many scenes each need their own request), tight enough to stop a
+// scripted/bug-driven spam loop.
+const JOB_REQUEST_RATE_LIMIT_WINDOW_MINUTES = 10;
+const JOB_REQUEST_RATE_LIMIT_MAX_ATTEMPTS = 30;
 
 export function isStalled(job: { status: string; lastHeartbeatAt: Date }): boolean {
   return job.status === "running" && Date.now() - job.lastHeartbeatAt.getTime() > STALL_THRESHOLD_MS;
@@ -16,6 +28,7 @@ export function isStalled(job: { status: string; lastHeartbeatAt: Date }): boole
  */
 export async function requestJob(
   input: {
+    ownerId: string;
     type: string;
     provider: string;
     model: string | null;
@@ -28,6 +41,28 @@ export async function requestJob(
     | { worldId: string; projectId?: undefined; characterId?: undefined }
   ),
 ) {
+  const allowed = await checkRateLimit({
+    scope: "job_request",
+    // ownerId is already a stable internal identifier, not raw PII from a
+    // request — no need to hash it the way an IP/email is hashed elsewhere.
+    key: input.ownerId,
+    windowMinutes: JOB_REQUEST_RATE_LIMIT_WINDOW_MINUTES,
+    maxAttempts: JOB_REQUEST_RATE_LIMIT_MAX_ATTEMPTS,
+  });
+  if (!allowed) {
+    throw new Error("Too many generation requests. Please wait a few minutes and try again.");
+  }
+
+  // Server-side authorization, not a UI nicety — checked here so every
+  // generation type is gated consistently through this one choke point,
+  // the same way the rate limit above is. Runs on every call including a
+  // retried/duplicate submit (idempotencyKey match below) rather than only
+  // on first creation — the rare cost is a legitimate retry getting
+  // blocked if credits were exhausted by *other* jobs in the meantime,
+  // which is an acceptable edge case given the alternative (restructuring
+  // around "is this actually a new charge") adds real complexity for it.
+  await requireCredits(input.ownerId, input.estimatedCostCents);
+
   const inserted = await db
     .insert(generationJobs)
     .values({
@@ -59,6 +94,7 @@ export async function requestJob(
   } else {
     await db.insert(usageCosts).values({
       jobId: job.id,
+      ownerId: input.ownerId,
       projectId: input.projectId ?? null,
       characterId: input.characterId ?? null,
       worldId: input.worldId ?? null,
@@ -87,6 +123,42 @@ export async function confirmJob(jobId: string) {
   await db.update(usageCosts).set({ confirmedAt: new Date() }).where(eq(usageCosts.jobId, jobId));
 
   return { ...job, status: "running" as const };
+}
+
+/**
+ * Records what a completed job actually cost, once it's known — every
+ * executor calls this right before completeJob(). Provider Hub's spend
+ * view reads usageCosts.actualCostCents; until this existed it was never
+ * written by anything, so "actual spend" was always $0 regardless of real
+ * generation activity. Best-effort: a failure here shouldn't fail an
+ * otherwise-successful job over a bookkeeping write.
+ */
+export async function recordActualCost(jobId: string, actualCostCents: number): Promise<void> {
+  try {
+    await db.update(usageCosts).set({ actualCostCents }).where(eq(usageCosts.jobId, jobId));
+  } catch (err) {
+    console.error(`[jobs] failed to record actual cost for job ${jobId}`, err);
+  }
+}
+
+/**
+ * For job types whose cost is already exact at request time (image/video
+ * generation priced per-unit or per-second, TTS priced per already-known
+ * character count, assembly priced per already-known scene duration total
+ * — see lib/cost-estimate.ts) — there's no real variance between estimate
+ * and actual the way there is for an LLM call's token usage, so the
+ * estimate already written to usageCosts.estimatedCostCents at job
+ * creation IS the actual cost. Copies it over rather than recomputing.
+ */
+export async function recordActualCostFromEstimate(jobId: string): Promise<void> {
+  try {
+    const [cost] = await db.select({ estimatedCostCents: usageCosts.estimatedCostCents }).from(usageCosts).where(eq(usageCosts.jobId, jobId)).limit(1);
+    if (cost) {
+      await db.update(usageCosts).set({ actualCostCents: cost.estimatedCostCents }).where(eq(usageCosts.jobId, jobId));
+    }
+  } catch (err) {
+    console.error(`[jobs] failed to record actual cost (from estimate) for job ${jobId}`, err);
+  }
 }
 
 export async function cancelJob(jobId: string) {

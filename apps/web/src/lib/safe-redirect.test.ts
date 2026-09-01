@@ -25,9 +25,10 @@ describe("sanitizeCallbackUrl — open-redirect prevention for post-login naviga
     expect(sanitizeCallbackUrl("dashboard")).toBe("/dashboard");
   });
 
-  it("refuses to redirect back to /login or /setup, which would loop", () => {
+  it("refuses to redirect back to /login, /setup, or /register, which would loop", () => {
     expect(sanitizeCallbackUrl("/login")).toBe("/dashboard");
     expect(sanitizeCallbackUrl("/setup")).toBe("/dashboard");
+    expect(sanitizeCallbackUrl("/register")).toBe("/dashboard");
   });
 
   it("checks the disallowed-target path ignoring query/hash so /login?next=x still redirects", () => {

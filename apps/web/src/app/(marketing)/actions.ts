@@ -20,8 +20,14 @@ const MIN_SUBMIT_MS = 1500;
 async function hashIp(ip: string): Promise<string> {
   // Salted with AUTH_SECRET (already a private, per-deploy secret this app
   // has) so the hash can't be reversed or correlated across deployments —
-  // this exists purely to rate-limit, never to identify a visitor.
-  const salt = process.env.AUTH_SECRET ?? "outlet-ai-studio-waitlist";
+  // this exists purely to rate-limit, never to identify a visitor. Warns
+  // loudly rather than silently degrading if AUTH_SECRET is somehow unset
+  // — a production deploy missing it has bigger problems than this.
+  let salt = process.env.AUTH_SECRET;
+  if (!salt) {
+    console.warn("[waitlist] AUTH_SECRET is not set — falling back to a non-secret salt.");
+    salt = "outlet-ai-studio-insecure-fallback-salt";
+  }
   return crypto.createHash("sha256").update(`${salt}:${ip}`).digest("hex");
 }
 

@@ -4,6 +4,7 @@ import { sanitizeCallbackUrl } from "@/lib/safe-redirect";
 import { RegisterForm } from "./register-form";
 
 export const dynamic = "force-dynamic";
+export const metadata = { title: "Create your account — Outlet AI Studio", robots: { index: false } };
 
 export default async function RegisterPage({
   searchParams,

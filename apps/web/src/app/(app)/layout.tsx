@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { auth } from "@/auth";
 import { ToastProvider } from "@/components/ui";
@@ -7,6 +8,10 @@ import { AppShell } from "./app-shell";
 // Session-dependent data (nav visibility, the signed-in user's own email) —
 // never statically cache it.
 export const dynamic = "force-dynamic";
+
+// The authenticated product is behind a login — keep it out of search
+// indexes entirely.
+export const metadata: Metadata = { robots: { index: false, follow: false } };
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const session = await auth();

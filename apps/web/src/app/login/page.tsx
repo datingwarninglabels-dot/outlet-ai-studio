@@ -6,6 +6,7 @@ import { sanitizeCallbackUrl } from "@/lib/safe-redirect";
 import { LoginForm } from "./login-form";
 
 export const dynamic = "force-dynamic";
+export const metadata = { title: "Sign in — Outlet AI Studio", robots: { index: false } };
 
 export default async function LoginPage({
   searchParams,

@@ -15,6 +15,7 @@ const NAV_LINKS = [
 
 export function MarketingHeader() {
   const [menuOpen, setMenuOpen] = useState(false);
+  const [activeId, setActiveId] = useState<string | null>(null);
 
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
@@ -26,6 +27,24 @@ export function MarketingHeader() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, []);
 
+  // Highlight the nav link for whichever section is currently in view.
+  useEffect(() => {
+    const targets = NAV_LINKS.map((l) => document.getElementById(l.href.slice(1))).filter(
+      (el): el is HTMLElement => el !== null,
+    );
+    if (targets.length === 0) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const visible = entries.filter((e) => e.isIntersecting).sort((a, b) => b.intersectionRatio - a.intersectionRatio);
+        if (visible[0]) setActiveId(`#${visible[0].target.id}`);
+      },
+      { rootMargin: "-45% 0px -50% 0px" },
+    );
+    targets.forEach((t) => observer.observe(t));
+    return () => observer.disconnect();
+  }, []);
+
   const ctaHref = primaryCtaHref();
 
   return (
@@ -35,7 +54,14 @@ export function MarketingHeader() {
 
         <nav aria-label="Primary" className="hidden items-center gap-6 md:flex">
           {NAV_LINKS.map((link) => (
-            <a key={link.href} href={link.href} className="text-sm text-muted hover:text-foreground">
+            <a
+              key={link.href}
+              href={link.href}
+              aria-current={activeId === link.href ? "true" : undefined}
+              className={`text-sm transition-colors hover:text-foreground ${
+                activeId === link.href ? "font-medium text-foreground" : "text-muted"
+              }`}
+            >
               {link.label}
             </a>
           ))}

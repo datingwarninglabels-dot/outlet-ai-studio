@@ -1,3 +1,5 @@
+import { Badge } from "@/components/ui";
+
 type Feature = { title: string; body: string; status?: "planned" };
 
 const FEATURES: Feature[] = [
@@ -59,11 +61,7 @@ export function Features() {
             <div key={feature.title} className="flex flex-col gap-2 rounded-xl border border-border bg-background p-5">
               <div className="flex items-start justify-between gap-2">
                 <h3 className="text-base font-semibold text-balance">{feature.title}</h3>
-                {feature.status === "planned" && (
-                  <span className="shrink-0 rounded-full border border-border px-2 py-0.5 text-[10px] uppercase tracking-wide text-muted">
-                    Planned
-                  </span>
-                )}
+                {feature.status === "planned" && <Badge className="shrink-0">Planned</Badge>}
               </div>
               <p className="text-sm text-muted">{feature.body}</p>
             </div>

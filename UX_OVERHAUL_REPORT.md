@@ -1,9 +1,9 @@
 # UX / UI Overhaul — Outlet AI Studio
 
-*Completed 2026-09-06. Eight staged commits on `feat/customer-auth-stripe-billing-e2e`
-(`46f177a` → Stage 8), each pushed after `tsc` + `lint` + `build` + `vitest` passed. Test count
-184 → 203. No server action, auth rule, paywall check, or job/idempotency flow was changed —
-this was a presentation, flow, and additive-feature pass.*
+*Completed 2026-09-06. Ten staged commits on `feat/customer-auth-stripe-billing-e2e`
+(`46f177a` → `b7583a7`), each pushed after `tsc` + `lint` + `build` + `vitest` passed. Test
+count 184 → 207. No server action, auth rule, paywall check, or job/idempotency flow was
+changed — this was a presentation, flow, and additive-feature pass. (Stages 1–8 below; 9–10 in §10.)*
 
 ---
 
@@ -139,17 +139,27 @@ mediocre MVP was almost entirely **presentation and flow**:
 
 ## 10. Recommended next improvements, ranked by impact
 
-1. **Stand up a database and do the end-to-end walk above.** Nothing else can be trusted as
-   "done" until the authenticated flows run for real once.
-2. **Wire the Resend email** and test a real reset round-trip.
-3. **Scene-level progressive disclosure on the project page** — the pipeline rail is in; the next
-   step is collapsing completed sections to a summary row and expanding only the current step, so
-   a 10-scene project isn't a wall of forms.
-4. **Optimistic UI on scene edits and reorder** — right now every save is a full server round
-   trip + revalidate; the scene list visibly re-renders.
-5. **A real toast for the paywall / out-of-credits case** on the generate buttons (currently
-   inline `Paywall` only).
-6. **Marketing section consolidation** — six sections (UnifiedStudio, Workflow, Features,
-   CharactersWorlds, OutputFormats, ContentPackage) cover overlapping "what it does" ground and
-   could tighten to three without losing a single truthful claim.
-7. **`.gitattributes`** with `* text=auto eol=lf` to stop the CRLF churn.
+**Done in stages 9–10** (`3e7d750`, `b7583a7`):
+
+- ~~Progressive disclosure on the project page~~ — completed pipeline steps collapse to a
+  summary row; the step you're on stays open.
+- ~~Optimistic scene reorder~~ — ↑/↓ swap instantly (`useOptimistic` + `useTransition`) instead
+  of a full-page revalidate.
+- ~~Paywall-aware generate errors~~ — a hit credit limit renders the `Paywall` card with a link
+  to plans, not the raw string.
+- ~~`.gitattributes`~~ (`* text=auto eol=lf`).
+
+**Still open, ranked:**
+
+1. **Stand up a database and do the end-to-end walk in §9.** Nothing in the authenticated app
+   can be trusted as "done" until the flows run for real once.
+2. **Wire the Resend email** (`RESEND_API_KEY` + `EMAIL_FROM`) and test a real reset round-trip.
+3. **Optimistic UI on scene *field* edits** — reorder is optimistic now; the save-changes form
+   still does a full round-trip + revalidate.
+4. **Marketing section consolidation** — six "what it does" sections (UnifiedStudio, Workflow,
+   Features, CharactersWorlds, OutputFormats, ContentPackage) could tighten to ~three without
+   losing a truthful claim. Deliberately not done: marketing is already honest and well-built,
+   so the risk/reward of editing it was low. A content decision more than an engineering one.
+5. **The launch blockers** from `PRODUCTION_DEPLOYMENT_CHECKLIST.md` (CTA_MODE, SITE_URL, real
+   Stripe/Trigger.dev/DB credentials, credit-allowance and Price-ID values) — need real accounts,
+   out of scope for a UX pass.

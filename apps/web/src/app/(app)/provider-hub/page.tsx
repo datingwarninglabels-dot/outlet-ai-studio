@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
 import { notFound } from "next/navigation";
 import { auth } from "@/auth";
+import { Alert, Badge, Card, PageHeader } from "@/components/ui";
 import { db } from "@/db";
 import { usageCosts } from "@/db/schema";
 import {
@@ -95,35 +96,27 @@ export default async function ProviderHubPage() {
   );
 
   return (
-    <div className="flex max-w-2xl flex-col gap-8">
-      <div>
-        <h1 className="text-2xl font-semibold">Provider Hub</h1>
-        <p className="mt-1 text-sm text-muted">
-          What each provider does, whether it&apos;s configured, and what it&apos;s cost so far.
-        </p>
-        <p className="mt-2 rounded-lg border border-dashed border-border p-3 text-xs text-muted">
-          This is visibility only for now — credentials are still environment-variable-only (see the
-          root README). Adding, testing, and storing your own encrypted keys through this page isn&apos;t
-          built yet.
-        </p>
-      </div>
+    <div className="flex max-w-2xl flex-col gap-6">
+      <PageHeader
+        title="Provider Hub"
+        description="What each AI provider does, whether it's configured, and what it has cost so far."
+      />
+
+      <Alert tone="info">
+        Visibility only for now — credentials are set through environment variables (see the root README). Adding,
+        testing, and storing your own encrypted keys from this page isn&apos;t built yet.
+      </Alert>
 
       <div className="flex flex-col gap-3">
         {PROVIDER_SLOTS.map((slot) => {
           const spend = spendByProvider.get(slot.key);
           return (
-            <div key={slot.key} className="flex flex-col gap-2 rounded-lg border border-border bg-surface p-4">
-              <div className="flex items-center justify-between">
-                <p className="font-medium">{slot.label}</p>
-                <span
-                  className={`rounded-full border px-2 py-0.5 text-[10px] uppercase tracking-wide ${
-                    slot.configured
-                      ? "border-accent-teal/40 text-accent-teal"
-                      : "border-border text-muted"
-                  }`}
-                >
+            <Card key={slot.key} className="flex flex-col gap-2 p-4">
+              <div className="flex items-center justify-between gap-3">
+                <p className="font-medium text-foreground">{slot.label}</p>
+                <Badge tone={slot.configured ? "success" : "neutral"} dot>
                   {slot.configured ? "Configured" : "Not configured"}
-                </span>
+                </Badge>
               </div>
               <ul className="text-xs text-muted">
                 {slot.capabilities.map((c) => (
@@ -132,7 +125,7 @@ export default async function ProviderHubPage() {
               </ul>
               {!slot.configured && (
                 <p className="text-xs text-muted">
-                  Set <code>{slot.envVars.join(", ")}</code> and restart the app.
+                  Set <code className="font-mono">{slot.envVars.join(", ")}</code> and restart the app.
                 </p>
               )}
               <p className="text-xs text-muted">
@@ -142,7 +135,7 @@ export default async function ProviderHubPage() {
                     }`
                   : "No spend yet."}
               </p>
-            </div>
+            </Card>
           );
         })}
       </div>

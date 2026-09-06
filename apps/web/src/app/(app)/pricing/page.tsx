@@ -1,4 +1,5 @@
 import { auth } from "@/auth";
+import { PageHeader } from "@/components/ui";
 import { getEntitlement } from "@/lib/entitlements";
 import { PLANS } from "@/lib/plans";
 import { getPlanPriceDisplay } from "@/lib/stripe";
@@ -17,13 +18,10 @@ export default async function PricingPage() {
 
   return (
     <div className="flex flex-col gap-8">
-      <div className="max-w-2xl">
-        <h1 className="text-2xl font-semibold">Plans</h1>
-        <p className="mt-1 text-sm text-muted">
-          Every plan is credit-based — no unlimited-generation claim. Credit costs are shown before you confirm a
-          generation.
-        </p>
-      </div>
+      <PageHeader
+        title="Plans"
+        description="Every plan is credit-based — no unlimited-generation claim. Credit costs are shown before you confirm a generation."
+      />
 
       <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
         {PLANS.map((plan, i) => (

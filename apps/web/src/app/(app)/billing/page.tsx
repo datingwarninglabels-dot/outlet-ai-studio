@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { auth } from "@/auth";
+import { Alert, PageHeader } from "@/components/ui";
 import { getEntitlement } from "@/lib/entitlements";
 import { getPlan } from "@/lib/plans";
 import { ManageSubscriptionButton } from "./manage-subscription-button";
@@ -33,37 +34,20 @@ export default async function BillingPage({
       : 0;
 
   return (
-    <div className="flex max-w-2xl flex-col gap-8">
-      <div>
-        <h1 className="text-2xl font-semibold">Billing</h1>
-        <p className="mt-1 text-sm text-muted">Your plan, usage, and subscription.</p>
-      </div>
+    <div className="flex max-w-2xl flex-col gap-6">
+      <PageHeader title="Billing" description="Your plan, usage this cycle, and subscription." />
 
       {checkout === "success" && (
-        <p role="status" className="rounded-lg border border-accent/40 bg-accent-soft p-4 text-sm text-accent">
-          Checkout complete. It can take a few seconds for your plan to update here.
-        </p>
+        <Alert tone="success">Checkout complete. It can take a few seconds for your plan to update here.</Alert>
       )}
-      {checkout === "cancelled" && (
-        <p className="rounded-lg border border-border bg-surface p-4 text-sm text-muted">
-          Checkout was cancelled — you haven&apos;t been charged.
-        </p>
-      )}
+      {checkout === "cancelled" && <Alert tone="info">Checkout was cancelled — you haven&apos;t been charged.</Alert>}
       {error === "no-customer" && (
-        <p role="alert" className="rounded-lg border border-red-400/40 bg-red-400/10 p-4 text-sm text-red-400">
-          You don&apos;t have a billing account yet — subscribe to a paid plan first.
-        </p>
+        <Alert tone="danger">You don&apos;t have a billing account yet — subscribe to a paid plan first.</Alert>
       )}
       {error === "portal-failed" && (
-        <p role="alert" className="rounded-lg border border-red-400/40 bg-red-400/10 p-4 text-sm text-red-400">
-          Couldn&apos;t open the billing portal. Please try again.
-        </p>
+        <Alert tone="danger">Couldn&apos;t open the billing portal. Please try again.</Alert>
       )}
-      {error === "not-configured" && (
-        <p role="alert" className="rounded-lg border border-red-400/40 bg-red-400/10 p-4 text-sm text-red-400">
-          Billing isn&apos;t connected yet.
-        </p>
-      )}
+      {error === "not-configured" && <Alert tone="danger">Billing isn&apos;t connected yet.</Alert>}
 
       <section className="flex flex-col gap-3 rounded-xl border border-border bg-surface p-5">
         <div className="flex items-center justify-between">

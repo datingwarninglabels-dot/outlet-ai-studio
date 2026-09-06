@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { auth } from "@/auth";
+import { PageHeader } from "@/components/ui";
 import { getEntitlement } from "@/lib/entitlements";
 import { scriptProvider } from "@/lib/providers";
 import { PLATFORMS } from "@/lib/validation";
@@ -23,13 +24,10 @@ export default async function CreateVideoPage({
 
   return (
     <div className="flex flex-col gap-6">
-      <div>
-        <h1 className="text-2xl font-semibold">Create Video</h1>
-        <p className="mt-1 text-sm text-muted">
-          Start with your idea — this writes the script. Storyboard, voice, and visuals continue
-          from there on the project page.
-        </p>
-      </div>
+      <PageHeader
+        title="Create a video"
+        description="Start with your idea — this writes the script. Storyboard, voice, visuals, and export continue from there on the project page."
+      />
       {outOfCredits ? (
         <Paywall />
       ) : (

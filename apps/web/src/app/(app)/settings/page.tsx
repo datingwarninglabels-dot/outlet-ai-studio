@@ -1,7 +1,8 @@
+import { eq } from "drizzle-orm";
 import { auth } from "@/auth";
+import { Card, PageHeader } from "@/components/ui";
 import { db } from "@/db";
 import { users } from "@/db/schema";
-import { eq } from "drizzle-orm";
 
 export default async function SettingsPage() {
   const session = await auth();
@@ -10,13 +11,10 @@ export default async function SettingsPage() {
     : [];
 
   return (
-    <div className="flex max-w-lg flex-col gap-8">
-      <div>
-        <h1 className="text-2xl font-semibold">Settings</h1>
-        <p className="mt-1 text-sm text-muted">Account details.</p>
-      </div>
+    <div className="flex max-w-lg flex-col gap-6">
+      <PageHeader title="Settings" description="Your account details." />
 
-      <section className="flex flex-col gap-3 rounded-lg border border-border bg-surface p-5">
+      <Card className="flex flex-col gap-3">
         <div>
           <p className="text-xs text-muted">Name</p>
           <p className="text-sm">{account?.name ?? "—"}</p>
@@ -29,7 +27,7 @@ export default async function SettingsPage() {
           <p className="text-xs text-muted">Account since</p>
           <p className="text-sm">{account?.createdAt?.toLocaleDateString() ?? "—"}</p>
         </div>
-      </section>
+      </Card>
 
       <p className="text-xs text-muted">
         Two-factor authentication and session/device management aren&apos;t available yet.

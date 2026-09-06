@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { usePathname } from "next/navigation";
-import type { NavItem } from "@/lib/nav";
+import { NAV_GROUP_ORDER, type NavGroup, type NavItem } from "@/lib/nav";
 import { NavLink } from "./nav-link";
 import { SignOutButton } from "./sign-out-button";
 
@@ -17,11 +17,13 @@ export function AppShell({
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const pathname = usePathname();
+  const asideRef = useRef<HTMLElement>(null);
+  const toggleRef = useRef<HTMLButtonElement>(null);
+
   // Closing the menu on navigation is a state adjustment in response to a
   // prop change, not a side effect — done during render (React's own
   // recommended pattern for this), not in a useEffect, which would trigger
-  // an extra unnecessary render and this project's set-state-in-effect lint
-  // rule (see waitlist-form.tsx's note on the same pitfall).
+  // an extra render and this project's set-state-in-effect lint rule.
   const [lastPathname, setLastPathname] = useState(pathname);
   if (pathname !== lastPathname) {
     setLastPathname(pathname);
@@ -36,12 +38,49 @@ export function AppShell({
     return () => window.removeEventListener("keydown", onKeyDown);
   }, []);
 
+  // Move focus into the off-canvas nav when it opens (mobile), trap Tab
+  // within it while open, and restore focus to the toggle on close.
+  useEffect(() => {
+    if (!menuOpen) return;
+    const aside = asideRef.current;
+    if (!aside) return;
+    const toggle = toggleRef.current;
+
+    const focusables = aside.querySelectorAll<HTMLElement>("a[href], button:not([disabled])");
+    focusables[0]?.focus();
+
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key !== "Tab" || focusables.length === 0) return;
+      const first = focusables[0];
+      const last = focusables[focusables.length - 1];
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    }
+
+    aside.addEventListener("keydown", onKeyDown);
+    return () => {
+      aside.removeEventListener("keydown", onKeyDown);
+      toggle?.focus();
+    };
+  }, [menuOpen]);
+
+  const groups = NAV_GROUP_ORDER.map((group) => ({
+    group,
+    items: navItems.filter((item) => item.group === group),
+  })).filter((g): g is { group: NavGroup; items: NavItem[] } => g.items.length > 0);
+
   return (
     <div className="flex min-h-full flex-1 flex-col md:flex-row">
       {/* Mobile-only top bar — the sidebar below is off-canvas until toggled. */}
       <header className="flex h-14 shrink-0 items-center justify-between border-b border-border bg-surface px-4 md:hidden">
         <p className="text-sm font-semibold tracking-tight">Outlet AI Studio</p>
         <button
+          ref={toggleRef}
           type="button"
           onClick={() => setMenuOpen((v) => !v)}
           aria-expanded={menuOpen}
@@ -67,8 +106,9 @@ export function AppShell({
       )}
 
       <aside
+        ref={asideRef}
         id="app-nav"
-        className={`fixed inset-y-0 left-0 z-50 flex w-64 shrink-0 -translate-x-full flex-col gap-6 border-r border-border bg-surface p-4 transition-transform duration-200 md:static md:z-auto md:translate-x-0 ${
+        className={`fixed inset-y-0 left-0 z-50 flex w-64 shrink-0 -translate-x-full flex-col gap-6 overflow-y-auto border-r border-border bg-surface p-4 transition-transform duration-200 md:static md:z-auto md:translate-x-0 ${
           menuOpen ? "translate-x-0" : ""
         }`}
       >
@@ -76,13 +116,22 @@ export function AppShell({
           <p className="text-sm font-semibold tracking-tight">Outlet AI Studio</p>
           <p className="text-xs text-muted">Your idea. Your voice. Your outlet.</p>
         </div>
-        <nav aria-label="Primary" className="flex flex-1 flex-col gap-1">
-          {navItems.map((item) => (
-            <NavLink key={item.href} item={item} />
+
+        <nav aria-label="Primary" className="flex flex-1 flex-col gap-5">
+          {groups.map(({ group, items }) => (
+            <div key={group} className="flex flex-col gap-1">
+              <p className="px-3 pb-1 text-[11px] font-semibold uppercase tracking-wider text-muted">{group}</p>
+              {items.map((item) => (
+                <NavLink key={item.href} item={item} />
+              ))}
+            </div>
           ))}
         </nav>
+
         <div className="flex flex-col gap-2 border-t border-border pt-4">
-          <p className="truncate text-xs text-muted">{userEmail}</p>
+          <p className="truncate text-xs text-muted" title={userEmail}>
+            {userEmail}
+          </p>
           <SignOutButton />
         </div>
       </aside>

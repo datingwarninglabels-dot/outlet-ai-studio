@@ -39,7 +39,6 @@ import {
   getFinalVideoUrl,
   getVisualUrl,
   getVoicePlaybackUrl,
-  moveScene,
   requestStoryboard,
   retryAnimation,
   retryAssembly,
@@ -47,7 +46,6 @@ import {
   retryStoryboard,
   retryVisual,
   retryVoice,
-  updateScene,
 } from "./actions";
 import { GenerateAnimationForm } from "./animation-form";
 import { GenerateAssemblyForm } from "./assembly-form";
@@ -56,7 +54,8 @@ import { JobNotifications } from "./job-notifications";
 import { ProjectPipeline } from "./pipeline";
 import { ProjectOverridesForm } from "./project-overrides-form";
 import { ContinuityWarningsCard } from "./continuity-warnings";
-import { GenerateStoryboardForm, SceneEditForm } from "./scene-form";
+import { GenerateStoryboardForm } from "./scene-form";
+import { SceneList } from "./scene-list";
 import { cancelThumbnails, confirmThumbnails, getThumbnailImageUrl, retryThumbnails } from "./thumbnail-actions";
 import { GenerateThumbnailsForm, ThumbnailCard } from "./thumbnail-form";
 import { GenerateVisualForm } from "./visual-form";
@@ -411,30 +410,23 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
 
         {projectScenes.length > 0 ? (
           <div className="flex flex-col gap-3">
-            {projectScenes.map((scene, index) => (
-              <SceneEditForm
-                key={scene.id}
-                projectId={project.id}
-                scene={{
-                  id: scene.id,
-                  narration: scene.narration,
-                  visualDescription: scene.visualDescription,
-                  audioDirection: scene.audioDirection ?? "",
-                  durationSeconds: scene.durationSeconds,
-                  provider: scene.provider,
-                  model: scene.model,
-                  version: scene.version,
-                  characterId: scene.characterId,
-                  worldId: scene.worldId,
-                }}
-                index={index}
-                sceneCount={projectScenes.length}
-                updateAction={updateScene}
-                moveAction={moveScene}
-                ownedCharacters={ownedCharacters.map((c) => ({ id: c.id, name: c.name }))}
-                ownedWorlds={ownedWorlds.map((w) => ({ id: w.id, name: w.name }))}
-              />
-            ))}
+            <SceneList
+              projectId={project.id}
+              scenes={projectScenes.map((scene) => ({
+                id: scene.id,
+                narration: scene.narration,
+                visualDescription: scene.visualDescription,
+                audioDirection: scene.audioDirection ?? "",
+                durationSeconds: scene.durationSeconds,
+                provider: scene.provider,
+                model: scene.model,
+                version: scene.version,
+                characterId: scene.characterId,
+                worldId: scene.worldId,
+              }))}
+              ownedCharacters={ownedCharacters.map((c) => ({ id: c.id, name: c.name }))}
+              ownedWorlds={ownedWorlds.map((w) => ({ id: w.id, name: w.name }))}
+            />
             <p className="text-xs text-muted">
               Total estimated runtime: {projectScenes.reduce((sum, s) => sum + (s.durationSeconds ?? 0), 0)}s across{" "}
               {projectScenes.length} scene{projectScenes.length === 1 ? "" : "s"}.

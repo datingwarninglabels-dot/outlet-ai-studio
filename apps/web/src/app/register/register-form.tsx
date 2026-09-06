@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { signIn } from "next-auth/react";
+import { Alert, Button, Field, Input } from "@/components/ui";
 import { registerCustomer } from "./actions";
 
 export function RegisterForm({ callbackUrl }: { callbackUrl: string }) {
@@ -66,58 +67,32 @@ export function RegisterForm({ callbackUrl }: { callbackUrl: string }) {
         <input id="website" ref={websiteRef} type="text" tabIndex={-1} autoComplete="off" />
       </div>
 
-      <div className="flex flex-col gap-1.5">
-        <label htmlFor="name" className="text-sm text-muted">
-          Your name
-        </label>
-        <input
-          id="name"
-          required
-          maxLength={100}
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          className="h-11 rounded-lg border border-border bg-surface px-3 text-foreground outline-none focus-visible:border-accent-teal"
-        />
-      </div>
-      <div className="flex flex-col gap-1.5">
-        <label htmlFor="email" className="text-sm text-muted">
-          Email
-        </label>
-        <input
-          id="email"
+      <Field id="name" label="Your name">
+        <Input required maxLength={100} autoComplete="name" value={name} onChange={(e) => setName(e.target.value)} />
+      </Field>
+      <Field id="email" label="Email">
+        <Input
           type="email"
           required
+          autoComplete="email"
           value={email}
           onChange={(e) => setEmail(e.target.value)}
-          className="h-11 rounded-lg border border-border bg-surface px-3 text-foreground outline-none focus-visible:border-accent-teal"
         />
-      </div>
-      <div className="flex flex-col gap-1.5">
-        <label htmlFor="password" className="text-sm text-muted">
-          Password (12+ characters)
-        </label>
-        <input
-          id="password"
+      </Field>
+      <Field id="password" label="Password" hint="At least 12 characters.">
+        <Input
           type="password"
           required
           minLength={12}
+          autoComplete="new-password"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
-          className="h-11 rounded-lg border border-border bg-surface px-3 text-foreground outline-none focus-visible:border-accent-teal"
         />
-      </div>
-      {error && (
-        <p role="alert" className="text-sm text-red-400">
-          {error}
-        </p>
-      )}
-      <button
-        type="submit"
-        disabled={pending}
-        className="h-11 rounded-lg bg-gradient-to-r from-accent-purple via-accent-blue to-accent-teal font-medium text-black disabled:opacity-60"
-      >
-        {pending ? "Creating account..." : "Create account"}
-      </button>
+      </Field>
+      {error && <Alert tone="danger">{error}</Alert>}
+      <Button type="submit" pending={pending} pendingLabel="Creating account…" fullWidth>
+        Create account
+      </Button>
     </form>
   );
 }

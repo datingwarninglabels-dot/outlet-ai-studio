@@ -17,7 +17,7 @@ export const authConfig = {
       // "/" is public too — it does its own owner-exists / session check and
       // renders the marketing page, or redirects to /setup or /dashboard.
       // "/legal" covers the placeholder policy pages (Privacy, Terms, ...).
-      const publicPaths = ["/", "/login", "/setup", "/register"];
+      const publicPaths = ["/", "/login", "/setup", "/register", "/forgot-password", "/reset-password"];
       const isPublic =
         publicPaths.includes(nextUrl.pathname) ||
         nextUrl.pathname.startsWith("/api/auth") ||

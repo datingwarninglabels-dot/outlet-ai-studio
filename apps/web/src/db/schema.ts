@@ -638,3 +638,21 @@ export const rateLimitEvents = pgTable(
   },
   (table) => [index("rate_limit_event_scope_key_created_at_idx").on(table.scope, table.key, table.createdAt)],
 );
+
+// Password-reset tokens. Only the SHA-256 hash of the token is stored, so a
+// database leak can't be replayed as a working reset link. Single-use
+// (usedAt) and short-lived (expiresAt, 1 hour). See lib/password-reset.ts.
+export const passwordResetTokens = pgTable(
+  "password_reset_token",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    tokenHash: text("token_hash").notNull().unique(),
+    expiresAt: timestamp("expires_at").notNull(),
+    usedAt: timestamp("used_at"),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (table) => [index("password_reset_token_user_id_idx").on(table.userId)],
+);

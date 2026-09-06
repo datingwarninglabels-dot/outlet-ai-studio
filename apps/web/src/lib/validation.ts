@@ -21,6 +21,15 @@ export const changePasswordSchema = z.object({
   newPassword: z.string().min(12, "New password must be at least 12 characters."),
 });
 
+export const forgotPasswordSchema = z.object({
+  email: z.string().email("Enter a valid email address."),
+});
+
+export const resetPasswordSchema = z.object({
+  token: z.string().min(1),
+  password: z.string().min(12, "Password must be at least 12 characters."),
+});
+
 export const registerSchema = z.object({
   name: z.string().min(1).max(100),
   email: z.string().email(),

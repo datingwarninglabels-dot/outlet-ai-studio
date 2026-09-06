@@ -155,6 +155,13 @@
       "when": 1788227043838,
       "tag": "0021_legal_masque",
       "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1788696938378,
+      "tag": "0022_young_toxin",
+      "breakpoints": true
     }
   ]
 }

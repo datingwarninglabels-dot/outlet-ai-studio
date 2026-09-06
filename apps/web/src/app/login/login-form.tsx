@@ -68,6 +68,9 @@ export function LoginForm({ callbackUrl }: { callbackUrl: string }) {
             onChange={(e) => setPassword(e.target.value)}
           />
         </Field>
+        <a href="/forgot-password" className="-mt-1 self-start text-sm text-accent hover:underline">
+          Forgot password?
+        </a>
         {error && <Alert tone="danger">{error}</Alert>}
         <Button type="submit" pending={pending} pendingLabel="Signing in…" fullWidth>
           Sign in

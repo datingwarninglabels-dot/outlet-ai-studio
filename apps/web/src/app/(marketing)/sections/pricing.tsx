@@ -1,3 +1,4 @@
+import { Badge } from "@/components/ui";
 import { PLANS } from "@/lib/plans";
 import { CTA_MODE, PRIMARY_CTA_LABEL, primaryCtaHref } from "@/lib/site-config";
 
@@ -27,9 +28,9 @@ export function Pricing() {
             >
               <div>
                 {plan.highlighted && (
-                  <span className="mb-2 inline-block rounded-full bg-accent-soft px-2.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-accent">
+                  <Badge tone="accent" className="mb-2">
                     Recommended
-                  </span>
+                  </Badge>
                 )}
                 <h3 className="text-xl font-semibold">{plan.name}</h3>
                 <p className="mt-1 text-sm text-muted">{plan.tagline}</p>

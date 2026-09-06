@@ -1,4 +1,4 @@
-import Link from "next/link";
+import { Button } from "@/components/ui";
 
 /**
  * Shown wherever a user hits their plan's credit limit — either reactively
@@ -16,15 +16,11 @@ export function Paywall({ compact = false }: { compact?: boolean }) {
     >
       <p className="text-sm font-medium text-accent">You&apos;ve used all your credits for this cycle</p>
       <p className="max-w-sm text-sm text-muted">
-        Upgrade your plan for a larger monthly credit allowance, or wait for your credits to reset next billing
-        cycle.
+        Upgrade your plan for a larger monthly credit allowance, or wait for your credits to reset next billing cycle.
       </p>
-      <Link
-        href="/pricing"
-        className="mt-1 flex h-10 items-center rounded-lg bg-accent px-4 text-sm font-medium text-accent-foreground hover:bg-accent-strong"
-      >
+      <Button href="/pricing" size="sm" className="mt-1">
         View plans
-      </Link>
+      </Button>
     </div>
   );
 }

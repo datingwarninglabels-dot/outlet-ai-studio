@@ -1,6 +1,7 @@
 import { desc, eq } from "drizzle-orm";
 import { notFound } from "next/navigation";
 import { auth } from "@/auth";
+import { Alert, Button, PageHeader } from "@/components/ui";
 import { db } from "@/db";
 import { generationJobs, usageCosts, worldReferences } from "@/db/schema";
 import { loadOwnedWorld } from "@/lib/authz";
@@ -67,14 +68,12 @@ export default async function WorldDetailPage({ params }: { params: Promise<{ id
       : null;
 
   return (
-    <div className="flex max-w-2xl flex-col gap-8">
-      <div>
-        <h1 className="text-2xl font-semibold">{world.name}</h1>
-      </div>
+    <div className="flex max-w-2xl flex-col gap-6">
+      <PageHeader title={world.name} />
 
-      <details className="rounded-lg border border-border bg-surface p-4">
-        <summary className="cursor-pointer text-sm font-medium">Edit world</summary>
-        <div className="mt-4">
+      <details className="rounded-xl border border-border bg-surface">
+        <summary className="cursor-pointer px-4 py-3 text-sm font-medium text-foreground">Edit world</summary>
+        <div className="border-t border-border p-4">
           <WorldForm
             action={updateWorld}
             worldId={world.id}
@@ -99,7 +98,7 @@ export default async function WorldDetailPage({ params }: { params: Promise<{ id
       </details>
 
       <section className="flex flex-col gap-3">
-        <h2 className="text-sm font-medium text-muted">Reference images</h2>
+        <h2 className="text-sm font-semibold text-muted">Reference images</h2>
         <UploadReferenceForm worldId={world.id} />
 
         {refCards.length > 0 && (
@@ -125,7 +124,7 @@ export default async function WorldDetailPage({ params }: { params: Promise<{ id
       </section>
 
       <section className="flex flex-col gap-3">
-        <h2 className="text-sm font-medium text-muted">Generate images</h2>
+        <h2 className="text-sm font-semibold text-muted">Generate images</h2>
 
         {imagesJob?.status === "awaiting_confirmation" && imagesCost && (
           <JobConfirmCard
@@ -142,9 +141,9 @@ export default async function WorldDetailPage({ params }: { params: Promise<{ id
           <StalledJobCard jobId={imagesJob.id} label="World image generation" retryAction={retryWorldImages} />
         )}
         {imagesJob?.status === "failed" && (
-          <p className="rounded-lg border border-dashed border-red-400/40 p-4 text-sm text-red-400">
-            Generation failed: {imagesJob.error}
-          </p>
+          <Alert tone="danger" title="Generation failed">
+            {imagesJob.error}
+          </Alert>
         )}
 
         <div className="flex flex-col gap-2">
@@ -155,12 +154,9 @@ export default async function WorldDetailPage({ params }: { params: Promise<{ id
 
       <form action={deleteWorld}>
         <input type="hidden" name="worldId" value={world.id} />
-        <button
-          type="submit"
-          className="h-11 w-fit rounded-lg border border-red-400/40 px-4 text-sm text-red-400 hover:bg-red-400/10"
-        >
+        <Button type="submit" variant="danger" size="sm">
           Delete world (permanent — removes all reference images from storage too)
-        </button>
+        </Button>
       </form>
     </div>
   );

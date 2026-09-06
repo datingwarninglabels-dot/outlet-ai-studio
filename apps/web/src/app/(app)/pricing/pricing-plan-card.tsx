@@ -1,6 +1,7 @@
 "use client";
 
 import { useActionState } from "react";
+import { Alert, Badge, Button } from "@/components/ui";
 import type { Plan } from "@/lib/plans";
 import { startCheckout, type BillingActionState } from "../billing/actions";
 
@@ -25,9 +26,9 @@ export function PricingPlanCard({
     >
       <div>
         {plan.highlighted && (
-          <span className="mb-2 inline-block rounded-full bg-accent-soft px-2.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-accent">
+          <Badge tone="accent" className="mb-2">
             Recommended
-          </span>
+          </Badge>
         )}
         <h3 className="text-xl font-semibold">{plan.name}</h3>
         <p className="mt-1 text-sm text-muted">{plan.tagline}</p>
@@ -41,17 +42,13 @@ export function PricingPlanCard({
       <ul className="flex flex-1 flex-col gap-2 text-sm text-muted">
         {plan.features.map((feature) => (
           <li key={feature} className="flex items-start gap-2">
-            <span aria-hidden="true" className="mt-1 h-1 w-1 shrink-0 rounded-full bg-accent" />
+            <span aria-hidden="true" className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-accent" />
             {feature}
           </li>
         ))}
       </ul>
 
-      {state.error && (
-        <p role="alert" className="text-sm text-red-400">
-          {state.error}
-        </p>
-      )}
+      {state.error && <Alert tone="danger">{state.error}</Alert>}
 
       {isCurrentPlan ? (
         <div className="flex h-11 items-center justify-center rounded-lg border border-border text-sm text-muted">
@@ -60,17 +57,15 @@ export function PricingPlanCard({
       ) : plan.stripePriceEnvVar ? (
         <form action={formAction}>
           <input type="hidden" name="plan" value={plan.id} />
-          <button
+          <Button
             type="submit"
-            disabled={pending}
-            className={`flex h-11 w-full items-center justify-center rounded-lg px-4 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-60 ${
-              plan.highlighted
-                ? "bg-accent text-accent-foreground hover:bg-accent-strong"
-                : "border border-border hover:bg-surface-raised"
-            }`}
+            variant={plan.highlighted ? "primary" : "secondary"}
+            fullWidth
+            pending={pending}
+            pendingLabel="Redirecting…"
           >
-            {pending ? "Redirecting..." : `Choose ${plan.name}`}
-          </button>
+            Choose {plan.name}
+          </Button>
         </form>
       ) : (
         <div className="flex h-11 items-center justify-center rounded-lg border border-border text-sm text-muted">

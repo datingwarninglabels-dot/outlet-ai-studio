@@ -99,7 +99,7 @@ export function WaitlistForm() {
       </label>
 
       {state.status === "error" && (
-        <p role="alert" className="text-sm text-red-400">
+        <p role="alert" className="text-sm text-danger">
           {state.message}
         </p>
       )}

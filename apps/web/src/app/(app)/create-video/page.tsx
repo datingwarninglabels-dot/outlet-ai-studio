@@ -10,15 +10,19 @@ import { Paywall } from "../paywall";
 export default async function CreateVideoPage({
   searchParams,
 }: {
-  searchParams: Promise<{ platform?: string }>;
+  searchParams: Promise<{ platform?: string; idea?: string }>;
 }) {
   const session = await auth();
   if (!session?.user) {
     redirect("/login");
   }
 
-  const { platform } = await searchParams;
+  const { platform, idea } = await searchParams;
   const defaultPlatform = PLATFORMS.find((p) => p === platform) ?? PLATFORMS[0];
+  // A prefilled idea can arrive from the dashboard's "start from an example"
+  // link. Trim to the schema's ceiling so an over-long query param can't
+  // make the form un-submittable.
+  const defaultIdea = typeof idea === "string" ? idea.slice(0, 2000) : "";
   const entitlement = await getEntitlement(session.user.id);
   const outOfCredits = entitlement.remainingCreditCents <= 0;
 
@@ -34,6 +38,7 @@ export default async function CreateVideoPage({
         <CreateVideoForm
           scriptProviderConfigured={scriptProvider.isConfigured()}
           defaultPlatform={defaultPlatform}
+          defaultIdea={defaultIdea}
         />
       )}
     </div>

@@ -173,15 +173,20 @@ export async function requestStoryboard(
     assumedOutputTokens: estimatedStoryboardOutputTokens(script.content.length),
   });
 
-  await requestJob({
-    projectId: project.id,
-    type: "storyboard",
-    provider: storyboardProvider.name,
-    model: STORYBOARD_MODEL,
-    idempotencyKey,
-    params: { scriptId: script.id, platform: project.platform ?? "Custom Project" },
-    estimatedCostCents: estimate.cents,
-  });
+  try {
+    await requestJob({
+      ownerId: session.user.id,
+      projectId: project.id,
+      type: "storyboard",
+      provider: storyboardProvider.name,
+      model: STORYBOARD_MODEL,
+      idempotencyKey,
+      params: { scriptId: script.id, platform: project.platform ?? "Custom Project" },
+      estimatedCostCents: estimate.cents,
+    });
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Something went wrong. Please try again." };
+  }
 
   revalidatePath(`/projects/${project.id}`);
   return { error: "" };
@@ -297,18 +302,23 @@ export async function requestVoice(_prev: ActionState, formData: FormData): Prom
   const [brandKit] = await db.select().from(brandKits).where(eq(brandKits.ownerId, session.user.id)).limit(1);
   const effectiveVoiceId = project.voiceIdOverride ?? brandKit?.defaultVoiceId ?? undefined;
 
-  await requestJob({
-    projectId: project.id,
-    type: "voice",
-    provider: ttsProvider.name,
-    model: null,
-    idempotencyKey,
-    params: { narration, voiceId: effectiveVoiceId },
-    estimatedCostCents: estimateTTSCostCents({
+  try {
+    await requestJob({
+      ownerId: session.user.id,
+      projectId: project.id,
+      type: "voice",
       provider: ttsProvider.name,
-      characterCount: narration.length,
-    }),
-  });
+      model: null,
+      idempotencyKey,
+      params: { narration, voiceId: effectiveVoiceId },
+      estimatedCostCents: estimateTTSCostCents({
+        provider: ttsProvider.name,
+        characterCount: narration.length,
+      }),
+    });
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Something went wrong. Please try again." };
+  }
 
   revalidatePath(`/projects/${project.id}`);
   return { error: "" };
@@ -446,18 +456,23 @@ export async function requestVisual(_prev: ActionState, formData: FormData): Pro
     return sum + cost;
   }, 0);
 
-  await requestJob({
-    projectId: project.id,
-    type: "visual",
-    provider: imageProvider.name,
-    model: null,
-    idempotencyKey,
-    params: {
-      sceneIds: scenesNeeded.map((s) => s.id),
-      ratio: ratioForPlatform(project.platform ?? "Custom Project"),
-    },
-    estimatedCostCents,
-  });
+  try {
+    await requestJob({
+      ownerId: session.user.id,
+      projectId: project.id,
+      type: "visual",
+      provider: imageProvider.name,
+      model: null,
+      idempotencyKey,
+      params: {
+        sceneIds: scenesNeeded.map((s) => s.id),
+        ratio: ratioForPlatform(project.platform ?? "Custom Project"),
+      },
+      estimatedCostCents,
+    });
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Something went wrong. Please try again." };
+  }
 
   revalidatePath(`/projects/${project.id}`);
   return { error: "" };
@@ -605,15 +620,20 @@ export async function requestAnimation(_prev: ActionState, formData: FormData): 
     0,
   );
 
-  await requestJob({
-    projectId: project.id,
-    type: "animation",
-    provider: videoProvider.name,
-    model: null,
-    idempotencyKey,
-    params: { sceneIds: scenesNeeded.map((s) => s.id), ratio },
-    estimatedCostCents,
-  });
+  try {
+    await requestJob({
+      ownerId: session.user.id,
+      projectId: project.id,
+      type: "animation",
+      provider: videoProvider.name,
+      model: null,
+      idempotencyKey,
+      params: { sceneIds: scenesNeeded.map((s) => s.id), ratio },
+      estimatedCostCents,
+    });
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Something went wrong. Please try again." };
+  }
 
   revalidatePath(`/projects/${project.id}`);
   return { error: "" };
@@ -755,18 +775,23 @@ export async function requestAssembly(_prev: ActionState, formData: FormData): P
   const totalDurationSeconds = projectScenes.reduce((sum, s) => sum + (s.durationSeconds ?? 5), 0);
   const aspectRatio = shotstackAspectRatioForPlatform(project.platform ?? "Custom Project");
 
-  await requestJob({
-    projectId: project.id,
-    type: "assembly",
-    provider: assemblyProvider.name,
-    model: null,
-    idempotencyKey,
-    params: { sceneIds: projectScenes.map((s) => s.id), aspectRatio },
-    estimatedCostCents: estimateAssemblyCostCents({
+  try {
+    await requestJob({
+      ownerId: session.user.id,
+      projectId: project.id,
+      type: "assembly",
       provider: assemblyProvider.name,
-      totalDurationSeconds,
-    }),
-  });
+      model: null,
+      idempotencyKey,
+      params: { sceneIds: projectScenes.map((s) => s.id), aspectRatio },
+      estimatedCostCents: estimateAssemblyCostCents({
+        provider: assemblyProvider.name,
+        totalDurationSeconds,
+      }),
+    });
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Something went wrong. Please try again." };
+  }
 
   revalidatePath(`/projects/${project.id}`);
   return { error: "" };

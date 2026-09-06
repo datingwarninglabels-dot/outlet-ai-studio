@@ -1,6 +1,6 @@
 import { and, desc, eq } from "drizzle-orm";
 import { db } from "@/db";
-import { generationJobs, mediaAssets, scenes } from "@/db/schema";
+import { generationJobs, mediaAssets, projects, scenes } from "@/db/schema";
 import {
   completeJob,
   completeStep,
@@ -8,6 +8,7 @@ import {
   failStep,
   getStepOutput,
   publicErrorMessage,
+  recordActualCostFromEstimate,
   startStep,
   updateStepOutput,
   withRetry,
@@ -22,6 +23,13 @@ import { defineJobTask } from "./lib/job-task";
 type ProjectJob = typeof generationJobs.$inferSelect & { projectId: string };
 
 export async function executeAssemblyJob(job: ProjectJob): Promise<string | null> {
+  const [projectRow] = await db.select().from(projects).where(eq(projects.id, job.projectId)).limit(1);
+  if (!projectRow) {
+    const msg = "This project no longer exists.";
+    await failJob(job.id, msg, msg);
+    return msg;
+  }
+
   const stepId = await startStep(job.id, "assemble_video", 0);
 
   try {
@@ -117,6 +125,7 @@ export async function executeAssemblyJob(job: ProjectJob): Promise<string | null
     });
 
     await db.insert(mediaAssets).values({
+      ownerId: projectRow.ownerId,
       projectId: job.projectId,
       jobId: job.id,
       type: "final_video",
@@ -128,6 +137,7 @@ export async function executeAssemblyJob(job: ProjectJob): Promise<string | null
     });
 
     await completeStep(stepId, { sizeBytes: uploaded.sizeBytes, totalDurationSeconds, renderId });
+    await recordActualCostFromEstimate(job.id);
     await completeJob(job.id);
     return null;
   } catch (err) {

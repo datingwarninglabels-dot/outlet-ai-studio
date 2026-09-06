@@ -169,6 +169,8 @@ export class AnthropicStoryboardProvider implements StoryboardProvider {
       provider: this.name,
       model: MODEL,
       truncated,
+      promptTokens: message.usage.input_tokens,
+      completionTokens: message.usage.output_tokens,
     };
   }
 }

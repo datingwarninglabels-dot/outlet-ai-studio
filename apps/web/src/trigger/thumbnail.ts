@@ -1,7 +1,16 @@
 import { asc, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { generationJobs, mediaAssets, projects, scenes, thumbnails } from "@/db/schema";
-import { completeJob, completeStep, failJob, failStep, publicErrorMessage, startStep, withRetry } from "@/lib/jobs";
+import {
+  completeJob,
+  completeStep,
+  failJob,
+  failStep,
+  publicErrorMessage,
+  recordActualCostFromEstimate,
+  startStep,
+  withRetry,
+} from "@/lib/jobs";
 import { imageProvider, thumbnailRatioForPlatform } from "@/lib/providers";
 import { storageProvider } from "@/lib/storage-instance";
 import { overlayHeadline } from "@/lib/thumbnail-overlay";
@@ -33,7 +42,12 @@ export async function executeThumbnailJob(job: ProjectJob): Promise<string | nul
     .orderBy(asc(scenes.order))
     .limit(1);
   const [projectRow] = await db.select().from(projects).where(eq(projects.id, job.projectId)).limit(1);
-  const projectTitle = projectRow?.title ?? "Untitled";
+  if (!projectRow) {
+    const msg = "This project no longer exists.";
+    await failJob(job.id, msg, msg);
+    return msg;
+  }
+  const projectTitle = projectRow.title ?? "Untitled";
   const sceneVisual = firstScene?.visualDescription ?? null;
 
   const { ratio, width, height } = thumbnailRatioForPlatform(params.platform);
@@ -69,6 +83,7 @@ export async function executeThumbnailJob(job: ProjectJob): Promise<string | nul
       const [baseAsset] = await db
         .insert(mediaAssets)
         .values({
+          ownerId: projectRow.ownerId,
           projectId: job.projectId,
           jobId: job.id,
           type: "thumbnail_base",
@@ -91,6 +106,7 @@ export async function executeThumbnailJob(job: ProjectJob): Promise<string | nul
       const [compositedAsset] = await db
         .insert(mediaAssets)
         .values({
+          ownerId: projectRow.ownerId,
           projectId: job.projectId,
           jobId: job.id,
           type: "thumbnail_composited",
@@ -121,6 +137,7 @@ export async function executeThumbnailJob(job: ProjectJob): Promise<string | nul
     }
   }
 
+  await recordActualCostFromEstimate(job.id);
   await completeJob(job.id);
   return null;
 }

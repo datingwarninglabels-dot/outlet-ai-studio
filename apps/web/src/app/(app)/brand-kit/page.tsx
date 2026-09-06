@@ -1,5 +1,6 @@
-import { auth } from "@/auth";
 import { redirect } from "next/navigation";
+import { auth } from "@/auth";
+import { PageHeader } from "@/components/ui";
 import { getBrandAssetUrl, getOrCreateBrandKit } from "./actions";
 import { BrandAssetUploads, BrandKitForm } from "./brand-kit-form";
 
@@ -20,17 +21,14 @@ export default async function BrandKitPage() {
   ]);
 
   return (
-    <div className="flex max-w-2xl flex-col gap-8">
-      <div>
-        <h1 className="text-2xl font-semibold">Brand Kit</h1>
-        <p className="mt-1 text-sm text-muted">
-          One reusable identity, applied automatically to new projects. A project can override the
-          visual style or voice individually on its own page.
-        </p>
-      </div>
+    <div className="flex max-w-2xl flex-col gap-6">
+      <PageHeader
+        title="Brand Kit"
+        description="One reusable identity, applied automatically to new projects. A project can override the visual style or voice individually on its own page."
+      />
 
       <section className="flex flex-col gap-3">
-        <h2 className="text-sm font-medium text-muted">Logo, intro, outro</h2>
+        <h2 className="text-sm font-semibold text-muted">Logo, intro, outro</h2>
         <BrandAssetUploads logoUrl={logoUrl} introUrl={introUrl} outroUrl={outroUrl} />
         <p className="text-xs text-muted">
           Stored and available for future rendering steps — burning these into the assembled video
@@ -39,7 +37,7 @@ export default async function BrandKitPage() {
       </section>
 
       <section className="flex flex-col gap-3">
-        <h2 className="text-sm font-medium text-muted">Defaults</h2>
+        <h2 className="text-sm font-semibold text-muted">Defaults</h2>
         <BrandKitForm
           defaults={{
             colors: (brandKit.colors as string[]) ?? [],

@@ -1,6 +1,7 @@
 import { and, asc, desc, eq, inArray, isNull } from "drizzle-orm";
 import { notFound } from "next/navigation";
 import { auth } from "@/auth";
+import { Alert, Badge, Button, PageHeader } from "@/components/ui";
 import { db } from "@/db";
 import {
   continuityChecks,
@@ -13,6 +14,8 @@ import {
   usageCosts,
 } from "@/db/schema";
 import { isStalled } from "@/lib/jobs";
+import { jobStatusLabel, jobStatusTone, jobTypeLabel } from "@/lib/labels";
+import { derivePipeline, type PipelineStepState } from "@/lib/pipeline";
 import { assemblyProvider, imageProvider, storyboardProvider, ttsProvider, videoProvider } from "@/lib/providers";
 import { storageProvider } from "@/lib/storage-instance";
 import { loadOwnedProject } from "@/lib/authz";
@@ -36,7 +39,6 @@ import {
   getFinalVideoUrl,
   getVisualUrl,
   getVoicePlaybackUrl,
-  moveScene,
   requestStoryboard,
   retryAnimation,
   retryAssembly,
@@ -44,19 +46,94 @@ import {
   retryStoryboard,
   retryVisual,
   retryVoice,
-  updateScene,
 } from "./actions";
 import { GenerateAnimationForm } from "./animation-form";
 import { GenerateAssemblyForm } from "./assembly-form";
 import { JobConfirmCard, StalledJobCard } from "@/components/job-cards";
 import { JobNotifications } from "./job-notifications";
+import { ProjectPipeline } from "./pipeline";
 import { ProjectOverridesForm } from "./project-overrides-form";
 import { ContinuityWarningsCard } from "./continuity-warnings";
-import { GenerateStoryboardForm, SceneEditForm } from "./scene-form";
+import { GenerateStoryboardForm } from "./scene-form";
+import { SceneList } from "./scene-list";
 import { cancelThumbnails, confirmThumbnails, getThumbnailImageUrl, retryThumbnails } from "./thumbnail-actions";
 import { GenerateThumbnailsForm, ThumbnailCard } from "./thumbnail-form";
 import { GenerateVisualForm } from "./visual-form";
 import { GenerateVoiceForm } from "./voice-form";
+
+const SECTION_CLASS = "scroll-mt-28 flex flex-col gap-3 outline-none";
+
+const STATE_TONE: Record<PipelineStepState, "neutral" | "accent" | "success" | "warning" | "danger"> = {
+  locked: "neutral",
+  ready: "accent",
+  awaiting_confirmation: "warning",
+  running: "accent",
+  failed: "danger",
+  done: "success",
+};
+
+const STATE_TEXT: Record<PipelineStepState, string> = {
+  locked: "Locked",
+  ready: "Ready",
+  awaiting_confirmation: "Confirm cost",
+  running: "Running",
+  failed: "Failed",
+  done: "Done",
+};
+
+/**
+ * One pipeline section. A completed step that isn't the one the user is
+ * working on renders collapsed (summary + status) so a long project isn't
+ * a wall of forms; everything else renders open.
+ */
+function StepSection({
+  id,
+  title,
+  state,
+  children,
+}: {
+  id: string;
+  title: string;
+  state: PipelineStepState;
+  children: React.ReactNode;
+}) {
+  const heading = (
+    <div className="flex items-center justify-between gap-3">
+      <h2 className="text-sm font-semibold text-muted">{title}</h2>
+      <Badge tone={STATE_TONE[state]} dot>
+        {STATE_TEXT[state]}
+      </Badge>
+    </div>
+  );
+
+  if (state !== "done") {
+    return (
+      <section id={`step-${id}`} tabIndex={-1} className={SECTION_CLASS}>
+        {heading}
+        {children}
+      </section>
+    );
+  }
+
+  return (
+    <section id={`step-${id}`} tabIndex={-1} className={SECTION_CLASS}>
+      <details className="group">
+        <summary className="flex cursor-pointer list-none items-center justify-between gap-3">
+          <span className="flex items-center gap-2">
+            <span aria-hidden="true" className="text-muted transition-transform group-open:rotate-90">
+              ›
+            </span>
+            <h2 className="text-sm font-semibold text-muted">{title}</h2>
+          </span>
+          <Badge tone="success" dot>
+            Done
+          </Badge>
+        </summary>
+        <div className="mt-3 flex flex-col gap-3">{children}</div>
+      </details>
+    </section>
+  );
+}
 
 export default async function ProjectDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -72,25 +149,7 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
     notFound();
   }
 
-  const [script] = await db
-    .select()
-    .from(scripts)
-    .where(eq(scripts.projectId, project.id))
-    .orderBy(desc(scripts.createdAt))
-    .limit(1);
-
-  const projectScenes = await db
-    .select()
-    .from(scenes)
-    .where(eq(scenes.projectId, project.id))
-    .orderBy(asc(scenes.order));
-
-  const [ownedCharacters, ownedWorlds, brandKit] = await Promise.all([
-    listOwnedCharacters(session.user.id),
-    listOwnedWorlds(session.user.id),
-    getOrCreateBrandKit(session.user.id),
-  ]);
-
+  // Jobs first — the per-step cost/asset lookups below key off the job ids.
   const jobs = await db
     .select()
     .from(generationJobs)
@@ -104,77 +163,120 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
   const animationJob = jobs.find((job) => job.type === "animation");
   const assemblyJob = jobs.find((job) => job.type === "assembly");
   const thumbnailJob = jobs.find((job) => job.type === "thumbnail");
+  const jobIds = jobs.map((job) => job.id);
 
-  const [storyboardStep] = storyboardJob
-    ? await db
-        .select()
-        .from(jobSteps)
-        .where(and(eq(jobSteps.jobId, storyboardJob.id), eq(jobSteps.name, "generate_storyboard")))
-        .limit(1)
-    : [];
+  // One round of independent reads instead of ~20 sequential awaits.
+  const [
+    scriptRows,
+    projectScenes,
+    ownedCharacters,
+    ownedWorlds,
+    brandKit,
+    allCosts,
+    storyboardStepRows,
+    voiceAssetRows,
+    visualAssets,
+    animationAssets,
+    voiceAssetForAssemblyRows,
+    finalVideoAssetRows,
+    projectThumbnails,
+  ] = await Promise.all([
+    db.select().from(scripts).where(eq(scripts.projectId, project.id)).orderBy(desc(scripts.createdAt)).limit(1),
+    db.select().from(scenes).where(eq(scenes.projectId, project.id)).orderBy(asc(scenes.order)),
+    listOwnedCharacters(session.user.id),
+    listOwnedWorlds(session.user.id),
+    getOrCreateBrandKit(session.user.id),
+    jobIds.length > 0
+      ? db.select().from(usageCosts).where(inArray(usageCosts.jobId, jobIds))
+      : Promise.resolve([] as (typeof usageCosts.$inferSelect)[]),
+    storyboardJob
+      ? db
+          .select()
+          .from(jobSteps)
+          .where(and(eq(jobSteps.jobId, storyboardJob.id), eq(jobSteps.name, "generate_storyboard")))
+          .limit(1)
+      : Promise.resolve([] as (typeof jobSteps.$inferSelect)[]),
+    voiceJob
+      ? db.select().from(mediaAssets).where(eq(mediaAssets.jobId, voiceJob.id)).limit(1)
+      : Promise.resolve([] as (typeof mediaAssets.$inferSelect)[]),
+    db
+      .select()
+      .from(mediaAssets)
+      .where(and(eq(mediaAssets.projectId, project.id), eq(mediaAssets.type, "scene_image"))),
+    db
+      .select()
+      .from(mediaAssets)
+      .where(and(eq(mediaAssets.projectId, project.id), eq(mediaAssets.type, "scene_video"))),
+    db
+      .select()
+      .from(mediaAssets)
+      .where(and(eq(mediaAssets.projectId, project.id), eq(mediaAssets.type, "voice_audio")))
+      .limit(1),
+    db
+      .select()
+      .from(mediaAssets)
+      .where(and(eq(mediaAssets.projectId, project.id), eq(mediaAssets.type, "final_video")))
+      .orderBy(desc(mediaAssets.createdAt))
+      .limit(1),
+    db.select().from(thumbnails).where(eq(thumbnails.projectId, project.id)).orderBy(desc(thumbnails.createdAt)),
+  ]);
+
+  const [script] = scriptRows;
+  const [voiceAsset] = voiceAssetRows;
+  const [voiceAssetForAssembly] = voiceAssetForAssemblyRows;
+  const [finalVideoAsset] = finalVideoAssetRows;
+  const [storyboardStep] = storyboardStepRows;
   const storyboardTruncated = Boolean((storyboardStep?.output as { truncated?: boolean } | null)?.truncated);
 
-  const [scriptCost] = scriptJob
-    ? await db.select().from(usageCosts).where(eq(usageCosts.jobId, scriptJob.id)).limit(1)
-    : [];
-  const [storyboardCost] = storyboardJob
-    ? await db.select().from(usageCosts).where(eq(usageCosts.jobId, storyboardJob.id)).limit(1)
-    : [];
-  const [voiceCost] = voiceJob
-    ? await db.select().from(usageCosts).where(eq(usageCosts.jobId, voiceJob.id)).limit(1)
-    : [];
-  const [visualCost] = visualJob
-    ? await db.select().from(usageCosts).where(eq(usageCosts.jobId, visualJob.id)).limit(1)
-    : [];
-  const [animationCost] = animationJob
-    ? await db.select().from(usageCosts).where(eq(usageCosts.jobId, animationJob.id)).limit(1)
-    : [];
-  const [assemblyCost] = assemblyJob
-    ? await db.select().from(usageCosts).where(eq(usageCosts.jobId, assemblyJob.id)).limit(1)
-    : [];
-  const [thumbnailCost] = thumbnailJob
-    ? await db.select().from(usageCosts).where(eq(usageCosts.jobId, thumbnailJob.id)).limit(1)
-    : [];
+  const costByJobId = new Map<string, (typeof usageCosts.$inferSelect)>();
+  for (const cost of allCosts) {
+    if (!costByJobId.has(cost.jobId)) costByJobId.set(cost.jobId, cost);
+  }
+  const scriptCost = scriptJob ? costByJobId.get(scriptJob.id) : undefined;
+  const storyboardCost = storyboardJob ? costByJobId.get(storyboardJob.id) : undefined;
+  const voiceCost = voiceJob ? costByJobId.get(voiceJob.id) : undefined;
+  const visualCost = visualJob ? costByJobId.get(visualJob.id) : undefined;
+  const animationCost = animationJob ? costByJobId.get(animationJob.id) : undefined;
+  const assemblyCost = assemblyJob ? costByJobId.get(assemblyJob.id) : undefined;
+  const thumbnailCost = thumbnailJob ? costByJobId.get(thumbnailJob.id) : undefined;
 
-  const [voiceAsset] = voiceJob
-    ? await db
-        .select()
-        .from(mediaAssets)
-        .where(eq(mediaAssets.jobId, voiceJob.id))
-        .limit(1)
-    : [];
-  const voicePlaybackUrl = voiceAsset ? await getVoicePlaybackUrl(voiceAsset.id) : null;
+  // Second round — these depend on rows from the first.
+  const [voicePlaybackUrl, visualUrlEntries, animationUrlEntries, openContinuityChecks, finalVideoUrl, thumbnailCards] =
+    await Promise.all([
+      voiceAsset ? getVoicePlaybackUrl(voiceAsset.id) : Promise.resolve(null),
+      Promise.all(
+        visualAssets.map(async (asset) => [asset.sceneId, { asset, url: await getVisualUrl(asset.id) }] as const),
+      ),
+      Promise.all(
+        animationAssets.map(async (asset) => [asset.sceneId, { asset, url: await getAnimationUrl(asset.id) }] as const),
+      ),
+      projectScenes.length > 0
+        ? db
+            .select()
+            .from(continuityChecks)
+            .where(
+              and(
+                inArray(
+                  continuityChecks.sceneId,
+                  projectScenes.map((s) => s.id),
+                ),
+                isNull(continuityChecks.acknowledgedAt),
+              ),
+            )
+            .orderBy(desc(continuityChecks.createdAt))
+        : Promise.resolve([] as (typeof continuityChecks.$inferSelect)[]),
+      finalVideoAsset ? getFinalVideoUrl(finalVideoAsset.id) : Promise.resolve(null),
+      Promise.all(
+        projectThumbnails
+          .filter((t) => t.compositedAssetId)
+          .map(async (t) => ({ thumbnail: t, url: await getThumbnailImageUrl(t.compositedAssetId!) })),
+      ),
+    ]);
 
-  const visualAssets = await db
-    .select()
-    .from(mediaAssets)
-    .where(and(eq(mediaAssets.projectId, project.id), eq(mediaAssets.type, "scene_image")));
-  const visualsBySceneId = new Map(
-    await Promise.all(
-      visualAssets.map(async (asset) => [asset.sceneId, { asset, url: await getVisualUrl(asset.id) }] as const),
-    ),
-  );
+  const visualsBySceneId = new Map(visualUrlEntries);
+  const animationsBySceneId = new Map(animationUrlEntries);
   const scenesRemaining = projectScenes.filter((s) => !visualsBySceneId.has(s.id)).length;
 
-  // Unacknowledged continuity checks with at least one warning, across this
-  // project's scenes — acknowledged checks and clean checks (no warnings)
-  // don't need to show anything. Keyed by scene, most recent first.
-  const openContinuityChecks =
-    projectScenes.length > 0
-      ? await db
-          .select()
-          .from(continuityChecks)
-          .where(
-            and(
-              inArray(
-                continuityChecks.sceneId,
-                projectScenes.map((s) => s.id),
-              ),
-              isNull(continuityChecks.acknowledgedAt),
-            ),
-          )
-          .orderBy(desc(continuityChecks.createdAt))
-      : [];
   const continuityWarningsBySceneId = new Map<string, { id: string; warnings: { field: string; note: string }[] }>();
   for (const check of openContinuityChecks) {
     const warnings = check.warnings as { field: string; note: string }[];
@@ -183,59 +285,43 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
     }
   }
 
-  const animationAssets = await db
-    .select()
-    .from(mediaAssets)
-    .where(and(eq(mediaAssets.projectId, project.id), eq(mediaAssets.type, "scene_video")));
-  const animationsBySceneId = new Map(
-    await Promise.all(
-      animationAssets.map(
-        async (asset) => [asset.sceneId, { asset, url: await getAnimationUrl(asset.id) }] as const,
-      ),
-    ),
-  );
   const scenesAnimatable = projectScenes.filter((s) => visualsBySceneId.has(s.id));
-  const scenesRemainingForAnimation = scenesAnimatable.filter(
-    (s) => !animationsBySceneId.has(s.id),
-  ).length;
-
-  const [voiceAssetForAssembly] = await db
-    .select()
-    .from(mediaAssets)
-    .where(and(eq(mediaAssets.projectId, project.id), eq(mediaAssets.type, "voice_audio")))
-    .limit(1);
+  const scenesRemainingForAnimation = scenesAnimatable.filter((s) => !animationsBySceneId.has(s.id)).length;
   const scenesMissingVisual = projectScenes.filter((s) => !visualsBySceneId.has(s.id)).length;
 
-  const [finalVideoAsset] = await db
-    .select()
-    .from(mediaAssets)
-    .where(and(eq(mediaAssets.projectId, project.id), eq(mediaAssets.type, "final_video")))
-    .orderBy(desc(mediaAssets.createdAt))
-    .limit(1);
-  const finalVideoUrl = finalVideoAsset ? await getFinalVideoUrl(finalVideoAsset.id) : null;
-
-  const projectThumbnails = await db
-    .select()
-    .from(thumbnails)
-    .where(eq(thumbnails.projectId, project.id))
-    .orderBy(desc(thumbnails.createdAt));
-  const thumbnailCards = await Promise.all(
-    projectThumbnails
-      .filter((t) => t.compositedAssetId)
-      .map(async (t) => ({
-        thumbnail: t,
-        url: await getThumbnailImageUrl(t.compositedAssetId!),
-      })),
-  );
+  const pipeline = derivePipeline({
+    hasScript: Boolean(script),
+    sceneCount: projectScenes.length,
+    hasVoice: Boolean(voiceAsset),
+    scenesWithVisual: visualsBySceneId.size,
+    scenesWithAnimation: animationsBySceneId.size,
+    hasFinalVideo: Boolean(finalVideoAsset),
+    thumbnailCount: thumbnailCards.length,
+    jobByType: {
+      script: scriptJob ? { type: scriptJob.type, status: scriptJob.status } : undefined,
+      storyboard: storyboardJob ? { type: storyboardJob.type, status: storyboardJob.status } : undefined,
+      voice: voiceJob ? { type: voiceJob.type, status: voiceJob.status } : undefined,
+      visual: visualJob ? { type: visualJob.type, status: visualJob.status } : undefined,
+      animation: animationJob ? { type: animationJob.type, status: animationJob.status } : undefined,
+      assembly: assemblyJob ? { type: assemblyJob.type, status: assemblyJob.status } : undefined,
+      thumbnail: thumbnailJob ? { type: thumbnailJob.type, status: thumbnailJob.status } : undefined,
+    },
+  });
+  const stepState = new Map(pipeline.map((s) => [s.id, s.state] as const));
 
   return (
-    <div className="flex max-w-2xl flex-col gap-8">
-      <div>
-        <h1 className="text-2xl font-semibold">{project.title}</h1>
-        <p className="mt-1 text-sm text-muted">
-          {project.platform} · {project.status}
-        </p>
-      </div>
+    <div className="flex max-w-2xl flex-col gap-6">
+      <PageHeader
+        title={project.title}
+        description={project.platform ?? undefined}
+        actions={
+          <Button href={`/api/projects/${project.id}/export`} variant="secondary" size="sm">
+            Export package
+          </Button>
+        }
+      />
+
+      <ProjectPipeline steps={pipeline} />
 
       <ProjectOverridesForm
         projectId={project.id}
@@ -245,8 +331,7 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
         brandKitDefaultVoiceId={brandKit.defaultVoiceId ?? ""}
       />
 
-      <section className="flex flex-col gap-3">
-        <h2 className="text-sm font-medium text-muted">Script</h2>
+      <StepSection id="script" title="Script" state={stepState.get("script")!}>
         {scriptJob?.status === "awaiting_confirmation" && scriptCost && (
           <JobConfirmCard
             jobId={scriptJob.id}
@@ -262,22 +347,19 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
           <StalledJobCard jobId={scriptJob.id} label="Script generation" retryAction={retryScript} />
         )}
         {scriptJob?.status === "failed" && (
-          <p className="rounded-lg border border-dashed border-red-400/40 p-6 text-sm text-red-400">
-            Script generation failed: {scriptJob.error}. Start a new project from Create Video to try
-            again.
-          </p>
+          <Alert tone="danger" title="Script generation failed">
+            {scriptJob.error}. Start a new project from Create Video to try again.
+          </Alert>
         )}
         {scriptJob?.status === "cancelled" && (
-          <p className="rounded-lg border border-dashed border-border p-6 text-sm text-muted">
-            Script generation was cancelled before it started — no cost was incurred.
-          </p>
+          <Alert tone="info">Script generation was cancelled before it started — no cost was incurred.</Alert>
         )}
         {script ? (
-          <div className="rounded-lg border border-border bg-surface p-4">
+          <div className="rounded-xl border border-border bg-surface p-4">
             <p className="whitespace-pre-wrap text-sm">{script.content}</p>
             <p className="mt-4 text-xs text-muted">
-              {script.provider}/{script.model} · {script.promptTokens ?? "?"} in /{" "}
-              {script.completionTokens ?? "?"} out tokens
+              {script.provider}/{script.model} · {script.promptTokens ?? "?"} in / {script.completionTokens ?? "?"} out
+              tokens
             </p>
           </div>
         ) : (
@@ -287,11 +369,9 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
             </p>
           )
         )}
-      </section>
+      </StepSection>
 
-      <section className="flex flex-col gap-3">
-        <h2 className="text-sm font-medium text-muted">Storyboard</h2>
-
+      <StepSection id="storyboard" title="Storyboard" state={stepState.get("storyboard")!}>
         {storyboardJob?.status === "awaiting_confirmation" && storyboardCost && (
           <JobConfirmCard
             jobId={storyboardJob.id}
@@ -304,67 +384,56 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
           />
         )}
         {storyboardJob?.status === "running" && isStalled(storyboardJob) && (
-          <StalledJobCard
-            jobId={storyboardJob.id}
-            label="Storyboard generation"
-            retryAction={retryStoryboard}
-          />
+          <StalledJobCard jobId={storyboardJob.id} label="Storyboard generation" retryAction={retryStoryboard} />
         )}
         {storyboardJob?.status === "failed" && (
-          <p className="rounded-lg border border-dashed border-red-400/40 p-6 text-sm text-red-400">
-            Storyboard generation failed: {storyboardJob.error}
-          </p>
+          <Alert tone="danger" title="Storyboard generation failed">
+            {storyboardJob.error}
+          </Alert>
         )}
         {storyboardJob?.status === "succeeded" && storyboardTruncated && (
-          <div className="flex flex-col gap-3 rounded-lg border border-dashed border-amber-400/40 p-4">
-            <p className="text-sm text-amber-400">
-              The model&apos;s response was cut off before finishing — the scene list below may be
-              incomplete. Regenerating replaces it with a fresh attempt (a new request).
-            </p>
-            <GenerateStoryboardForm
-              projectId={project.id}
-              disabledReason={!storyboardProvider.isConfigured() ? "Storyboard generation isn't connected yet — add ANTHROPIC_API_KEY to your environment and restart the app." : null}
-              requestAction={requestStoryboard}
-            />
-          </div>
+          <Alert tone="warning" title="The model's response was cut off">
+            The scene list below may be incomplete. Regenerating replaces it with a fresh attempt (a new request).
+            <div className="mt-3">
+              <GenerateStoryboardForm
+                projectId={project.id}
+                disabledReason={
+                  !storyboardProvider.isConfigured()
+                    ? "Storyboard generation isn't connected yet — add ANTHROPIC_API_KEY to your environment and restart the app."
+                    : null
+                }
+                requestAction={requestStoryboard}
+              />
+            </div>
+          </Alert>
         )}
 
         {projectScenes.length > 0 ? (
           <div className="flex flex-col gap-3">
-            {projectScenes.map((scene, index) => (
-              <SceneEditForm
-                key={scene.id}
-                projectId={project.id}
-                scene={{
-                  id: scene.id,
-                  narration: scene.narration,
-                  visualDescription: scene.visualDescription,
-                  audioDirection: scene.audioDirection ?? "",
-                  durationSeconds: scene.durationSeconds,
-                  provider: scene.provider,
-                  model: scene.model,
-                  version: scene.version,
-                  characterId: scene.characterId,
-                  worldId: scene.worldId,
-                }}
-                index={index}
-                sceneCount={projectScenes.length}
-                updateAction={updateScene}
-                moveAction={moveScene}
-                ownedCharacters={ownedCharacters.map((c) => ({ id: c.id, name: c.name }))}
-                ownedWorlds={ownedWorlds.map((w) => ({ id: w.id, name: w.name }))}
-              />
-            ))}
+            <SceneList
+              projectId={project.id}
+              scenes={projectScenes.map((scene) => ({
+                id: scene.id,
+                narration: scene.narration,
+                visualDescription: scene.visualDescription,
+                audioDirection: scene.audioDirection ?? "",
+                durationSeconds: scene.durationSeconds,
+                provider: scene.provider,
+                model: scene.model,
+                version: scene.version,
+                characterId: scene.characterId,
+                worldId: scene.worldId,
+              }))}
+              ownedCharacters={ownedCharacters.map((c) => ({ id: c.id, name: c.name }))}
+              ownedWorlds={ownedWorlds.map((w) => ({ id: w.id, name: w.name }))}
+            />
             <p className="text-xs text-muted">
-              Total estimated runtime:{" "}
-              {projectScenes.reduce((sum, s) => sum + (s.durationSeconds ?? 0), 0)}s across{" "}
+              Total estimated runtime: {projectScenes.reduce((sum, s) => sum + (s.durationSeconds ?? 0), 0)}s across{" "}
               {projectScenes.length} scene{projectScenes.length === 1 ? "" : "s"}.
             </p>
           </div>
         ) : (
-          (!storyboardJob ||
-            storyboardJob.status === "failed" ||
-            storyboardJob.status === "cancelled") && (
+          (!storyboardJob || storyboardJob.status === "failed" || storyboardJob.status === "cancelled") && (
             <div className="flex flex-col gap-3 rounded-lg border border-dashed border-border p-6">
               <p className="text-sm text-muted">
                 {storyboardJob
@@ -385,11 +454,9 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
             </div>
           )
         )}
-      </section>
+      </StepSection>
 
-      <section className="flex flex-col gap-3">
-        <h2 className="text-sm font-medium text-muted">Voice</h2>
-
+      <StepSection id="voice" title="Voice" state={stepState.get("voice")!}>
         {voiceJob?.status === "awaiting_confirmation" && voiceCost && (
           <JobConfirmCard
             jobId={voiceJob.id}
@@ -405,16 +472,17 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
           <StalledJobCard jobId={voiceJob.id} label="Voice generation" retryAction={retryVoice} />
         )}
         {voiceJob?.status === "failed" && (
-          <p className="rounded-lg border border-dashed border-red-400/40 p-6 text-sm text-red-400">
-            Voice generation failed: {voiceJob.error}
-          </p>
+          <Alert tone="danger" title="Voice generation failed">
+            {voiceJob.error}
+          </Alert>
         )}
 
         {voicePlaybackUrl ? (
-          <div className="rounded-lg border border-border bg-surface p-4">
-            <audio controls src={voicePlaybackUrl} className="w-full" />
+          <div className="rounded-xl border border-border bg-surface p-4">
+            <audio controls preload="none" src={voicePlaybackUrl} className="w-full" />
             <p className="mt-2 text-xs text-muted">
-              {voiceAsset?.provider} · {(voiceAsset?.metadata as { characterCount?: number } | null)?.characterCount ?? "?"} characters
+              {voiceAsset?.provider} ·{" "}
+              {(voiceAsset?.metadata as { characterCount?: number } | null)?.characterCount ?? "?"} characters
             </p>
           </div>
         ) : (
@@ -440,11 +508,9 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
             </div>
           )
         )}
-      </section>
+      </StepSection>
 
-      <section className="flex flex-col gap-3">
-        <h2 className="text-sm font-medium text-muted">Visual</h2>
-
+      <StepSection id="visual" title="Visuals" state={stepState.get("visual")!}>
         {visualJob?.status === "awaiting_confirmation" && visualCost && (
           <JobConfirmCard
             jobId={visualJob.id}
@@ -460,9 +526,9 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
           <StalledJobCard jobId={visualJob.id} label="Visual generation" retryAction={retryVisual} />
         )}
         {visualJob?.status === "failed" && (
-          <p className="rounded-lg border border-dashed border-red-400/40 p-6 text-sm text-red-400">
-            Visual generation failed: {visualJob.error}
-          </p>
+          <Alert tone="danger" title="Visual generation failed">
+            {visualJob.error}
+          </Alert>
         )}
 
         {visualAssets.length > 0 && (
@@ -478,7 +544,8 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
                     <img
                       src={visual.url}
                       alt={`Generated visual for scene ${index + 1}`}
-                      className="w-full rounded"
+                      loading="lazy"
+                      className="aspect-square w-full rounded object-cover"
                     />
                     <p className="mt-1 text-xs text-muted">Scene {index + 1}</p>
                   </div>
@@ -511,11 +578,9 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
               />
             </div>
           )}
-      </section>
+      </StepSection>
 
-      <section className="flex flex-col gap-3">
-        <h2 className="text-sm font-medium text-muted">Animate</h2>
-
+      <StepSection id="animation" title="Animation" state={stepState.get("animation")!}>
         {animationJob?.status === "awaiting_confirmation" && animationCost && (
           <JobConfirmCard
             jobId={animationJob.id}
@@ -531,9 +596,9 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
           <StalledJobCard jobId={animationJob.id} label="Animation" retryAction={retryAnimation} />
         )}
         {animationJob?.status === "failed" && (
-          <p className="rounded-lg border border-dashed border-red-400/40 p-6 text-sm text-red-400">
-            Animation failed: {animationJob.error}
-          </p>
+          <Alert tone="danger" title="Animation failed">
+            {animationJob.error}
+          </Alert>
         )}
 
         {animationAssets.length > 0 && (
@@ -543,7 +608,7 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
               if (!animation) return null;
               return (
                 <div key={scene.id} className="rounded-lg border border-border bg-surface p-2">
-                  <video controls src={animation.url} className="w-full rounded" />
+                  <video controls preload="none" src={animation.url} className="w-full rounded" />
                   <p className="mt-1 text-xs text-muted">Scene {index + 1}</p>
                 </div>
               );
@@ -553,8 +618,7 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
 
         {scenesAnimatable.length === 0 ? (
           <p className="rounded-lg border border-dashed border-border p-6 text-sm text-muted">
-            Generate a visual for at least one scene first — animation turns an existing image into a
-            short video.
+            Generate a visual for at least one scene first — animation turns an existing image into a short video.
           </p>
         ) : (
           scenesRemainingForAnimation > 0 &&
@@ -578,11 +642,9 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
             </div>
           )
         )}
-      </section>
+      </StepSection>
 
-      <section className="flex flex-col gap-3">
-        <h2 className="text-sm font-medium text-muted">Final video</h2>
-
+      <StepSection id="assembly" title="Final video" state={stepState.get("assembly")!}>
         {assemblyJob?.status === "awaiting_confirmation" && assemblyCost && (
           <JobConfirmCard
             jobId={assemblyJob.id}
@@ -598,14 +660,14 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
           <StalledJobCard jobId={assemblyJob.id} label="Video assembly" retryAction={retryAssembly} />
         )}
         {assemblyJob?.status === "failed" && (
-          <p className="rounded-lg border border-dashed border-red-400/40 p-6 text-sm text-red-400">
-            Video assembly failed: {assemblyJob.error}
-          </p>
+          <Alert tone="danger" title="Video assembly failed">
+            {assemblyJob.error}
+          </Alert>
         )}
 
         {finalVideoUrl ? (
-          <div className="rounded-lg border border-border bg-surface p-4">
-            <video controls src={finalVideoUrl} className="w-full rounded" />
+          <div className="rounded-xl border border-border bg-surface p-4">
+            <video controls preload="none" src={finalVideoUrl} className="w-full rounded" />
             <p className="mt-2 text-xs text-muted">{finalVideoAsset?.provider}</p>
           </div>
         ) : (
@@ -633,11 +695,9 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
             </div>
           )
         )}
-      </section>
+      </StepSection>
 
-      <section className="flex flex-col gap-3">
-        <h2 className="text-sm font-medium text-muted">Thumbnails</h2>
-
+      <StepSection id="thumbnail" title="Thumbnails" state={stepState.get("thumbnail")!}>
         {thumbnailJob?.status === "awaiting_confirmation" && thumbnailCost && (
           <JobConfirmCard
             jobId={thumbnailJob.id}
@@ -653,9 +713,9 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
           <StalledJobCard jobId={thumbnailJob.id} label="Thumbnail generation" retryAction={retryThumbnails} />
         )}
         {thumbnailJob?.status === "failed" && (
-          <p className="rounded-lg border border-dashed border-red-400/40 p-6 text-sm text-red-400">
-            Thumbnail generation failed: {thumbnailJob.error}
-          </p>
+          <Alert tone="danger" title="Thumbnail generation failed">
+            {thumbnailJob.error}
+          </Alert>
         )}
 
         {thumbnailCards.length > 0 && (
@@ -691,32 +751,27 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
             />
           </div>
         )}
-      </section>
+      </StepSection>
 
-      <section className="flex flex-col gap-3">
-        <h2 className="text-sm font-medium text-muted">Export</h2>
+      <section className={SECTION_CLASS}>
+        <h2 className="text-sm font-semibold text-muted">Export</h2>
         {script || projectScenes.length > 0 ? (
-          <div className="flex flex-col gap-2 rounded-lg border border-border bg-surface p-4">
+          <div className="flex flex-col items-start gap-3 rounded-xl border border-border bg-surface p-4">
             <p className="text-sm text-muted">
-              A .zip with everything generated so far — script, scene list, SRT/VTT captions, voice
-              track, still visuals, animated clips, and the assembled final video if one exists.
+              A .zip with everything generated so far — script, scene list, SRT/VTT captions, voice track, still
+              visuals, animated clips, and the assembled final video if one exists.
             </p>
-            <a
-              href={`/api/projects/${project.id}/export`}
-              className="h-11 w-fit rounded-lg border border-border px-4 text-sm font-medium leading-[44px] hover:bg-surface-raised"
-            >
+            <Button href={`/api/projects/${project.id}/export`} variant="secondary" size="sm">
               Download package
-            </a>
+            </Button>
           </div>
         ) : (
-          <p className="rounded-lg border border-dashed border-border p-6 text-sm text-muted">
-            Nothing to export yet.
-          </p>
+          <p className="rounded-lg border border-dashed border-border p-6 text-sm text-muted">Nothing to export yet.</p>
         )}
       </section>
 
-      <section className="flex flex-col gap-3">
-        <h2 className="text-sm font-medium text-muted">Generation jobs</h2>
+      <section className={SECTION_CLASS}>
+        <h2 className="text-sm font-semibold text-muted">Generation jobs</h2>
         <JobNotifications
           projectId={project.id}
           initialJobs={jobs.map((job) => ({ id: job.id, type: job.type, status: job.status }))}
@@ -725,33 +780,25 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
           {jobs.map((job) => (
             <li
               key={job.id}
-              className="flex items-center justify-between rounded-lg border border-border bg-surface p-3 text-sm"
+              className="flex items-center justify-between gap-3 rounded-xl border border-border bg-surface p-3 text-sm"
             >
-              <span>
-                {job.type} · {job.provider}
+              <span className="text-foreground">
+                {jobTypeLabel(job.type)} · {job.provider}
               </span>
-              <span
-                className={
-                  job.status === "failed"
-                    ? "text-red-400"
-                    : job.status === "succeeded"
-                      ? "text-accent-teal"
-                      : "text-muted"
-                }
-              >
-                {job.status}
-              </span>
+              <Badge tone={jobStatusTone(job.status)} dot>
+                {jobStatusLabel(job.status)}
+              </Badge>
             </li>
           ))}
         </ul>
         {jobs.some((job) => job.status === "failed" && job.error) && (
-          <p className="text-xs text-red-400">{jobs.find((job) => job.status === "failed")?.error}</p>
+          <p className="text-xs text-danger">{jobs.find((job) => job.status === "failed")?.error}</p>
         )}
       </section>
 
       <p className="text-xs text-muted">
-        Thumbnail export dimensions match each platform&apos;s recommended size; background
-        removal isn&apos;t supported yet.
+        Thumbnail export dimensions match each platform&apos;s recommended size; background removal isn&apos;t supported
+        yet.
       </p>
     </div>
   );

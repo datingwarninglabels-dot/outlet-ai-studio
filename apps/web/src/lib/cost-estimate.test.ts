@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  computeGenerationCostCents,
   estimateAssemblyCostCents,
   estimateContinuityCheckCostCents,
   estimateGenerationCostCents,
@@ -35,6 +36,43 @@ describe("estimateGenerationCostCents", () => {
     expect(() =>
       estimateGenerationCostCents({ model: "not-a-real-model", promptChars: 100, assumedOutputTokens: 100 }),
     ).toThrow(/no price table entry/i);
+  });
+});
+
+describe("computeGenerationCostCents — real-usage actual-cost recording", () => {
+  it("computes the same result as estimateGenerationCostCents given the same token counts", () => {
+    // 1000 input tokens @ 300c/Mtok + 1000 output tokens @ 1500c/Mtok = 1.8c -> 2
+    expect(
+      computeGenerationCostCents({ model: "claude-sonnet-5", inputTokens: 1000, outputTokens: 1000 }),
+    ).toBe(2);
+  });
+
+  it("reflects real usage that differs from the pre-generation estimate", () => {
+    // A real response can use far more/fewer tokens than the char-count-based
+    // estimate assumed — this is the whole reason actual cost is recorded
+    // separately rather than just reusing the estimate (unlike every other
+    // job type, whose cost is already exact at request time).
+    const cheaperThanEstimate = computeGenerationCostCents({
+      model: "claude-sonnet-5",
+      inputTokens: 500,
+      outputTokens: 200,
+    });
+    const pricierThanEstimate = computeGenerationCostCents({
+      model: "claude-sonnet-5",
+      inputTokens: 500,
+      outputTokens: 5000,
+    });
+    expect(pricierThanEstimate).toBeGreaterThan(cheaperThanEstimate);
+  });
+
+  it("throws for an unknown model rather than silently recording zero", () => {
+    expect(() =>
+      computeGenerationCostCents({ model: "not-a-real-model", inputTokens: 100, outputTokens: 100 }),
+    ).toThrow(/no price table entry/i);
+  });
+
+  it("never returns less than 1 cent", () => {
+    expect(computeGenerationCostCents({ model: "claude-sonnet-5", inputTokens: 1, outputTokens: 1 })).toBeGreaterThanOrEqual(1);
   });
 });
 

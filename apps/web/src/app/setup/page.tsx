@@ -4,6 +4,7 @@ import { users } from "@/db/schema";
 import { SetupForm } from "./setup-form";
 
 export const dynamic = "force-dynamic";
+export const metadata = { title: "Set up — Outlet AI Studio", robots: { index: false } };
 
 export default async function SetupPage() {
   const existing = await db.select({ id: users.id }).from(users).limit(1);

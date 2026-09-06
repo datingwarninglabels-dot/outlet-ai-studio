@@ -1,7 +1,16 @@
 import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { generationJobs, mediaAssets, worldReferences, worlds } from "@/db/schema";
-import { completeJob, completeStep, failJob, failStep, publicErrorMessage, startStep, withRetry } from "@/lib/jobs";
+import {
+  completeJob,
+  completeStep,
+  failJob,
+  failStep,
+  publicErrorMessage,
+  recordActualCostFromEstimate,
+  startStep,
+  withRetry,
+} from "@/lib/jobs";
 import { imageProvider } from "@/lib/providers";
 import { storageProvider } from "@/lib/storage-instance";
 import { buildWorldPrompt } from "@/lib/world-prompt";
@@ -65,6 +74,7 @@ export async function executeWorldImagesJob(job: typeof generationJobs.$inferSel
       const [asset] = await db
         .insert(mediaAssets)
         .values({
+          ownerId: world.ownerId,
           projectId: null,
           jobId: job.id,
           type: "world_reference",
@@ -94,6 +104,7 @@ export async function executeWorldImagesJob(job: typeof generationJobs.$inferSel
     }
   }
 
+  await recordActualCostFromEstimate(job.id);
   await completeJob(job.id);
   return null;
 }

@@ -5,9 +5,11 @@ import {
   createVideoSchema,
   loginSchema,
   projectOverridesSchema,
+  registerSchema,
   sceneUpdateSchema,
   setupSchema,
   thumbnailTextSchema,
+  waitlistSchema,
   worldSchema,
 } from "./validation";
 
@@ -199,6 +201,68 @@ describe("loginSchema / setupSchema — basic auth field shape", () => {
   it("requires a setup password of at least 12 characters (stricter than login)", () => {
     expect(setupSchema.safeParse({ name: "Owner", email: "a@b.com", password: "elevenchars" }).success).toBe(false);
     expect(setupSchema.safeParse({ name: "Owner", email: "a@b.com", password: "twelvecharss" }).success).toBe(true);
+  });
+});
+
+describe("registerSchema — public customer signup", () => {
+  const base = { name: "Creator", email: "creator@example.com", password: "twelvecharss", website: "" };
+
+  it("requires a password of at least 12 characters, same bar as setupSchema", () => {
+    expect(registerSchema.safeParse({ ...base, password: "elevenchars" }).success).toBe(false);
+    expect(registerSchema.safeParse(base).success).toBe(true);
+  });
+
+  it("rejects an invalid email", () => {
+    expect(registerSchema.safeParse({ ...base, email: "not-an-email" }).success).toBe(false);
+  });
+
+  it("requires a non-empty name", () => {
+    expect(registerSchema.safeParse({ ...base, name: "" }).success).toBe(false);
+  });
+
+  it("rejects a non-empty honeypot value (bot signal)", () => {
+    expect(registerSchema.safeParse({ ...base, website: "http://spam.example" }).success).toBe(false);
+  });
+
+  it("accepts an empty or omitted honeypot value (real visitor)", () => {
+    expect(registerSchema.safeParse(base).success).toBe(true);
+    expect(registerSchema.safeParse({ name: base.name, email: base.email, password: base.password }).success).toBe(
+      true,
+    );
+  });
+});
+
+describe("waitlistSchema — public landing-page signup", () => {
+  const base = { email: "creator@example.com", consent: true, website: "" };
+
+  it("rejects an invalid email", () => {
+    expect(waitlistSchema.safeParse({ ...base, email: "not-an-email" }).success).toBe(false);
+  });
+
+  it("requires consent to be explicitly true, not just truthy", () => {
+    expect(waitlistSchema.safeParse({ ...base, consent: false }).success).toBe(false);
+  });
+
+  it("accepts a request with no creatorType (optional field)", () => {
+    const result = waitlistSchema.safeParse(base);
+    expect(result.success).toBe(true);
+  });
+
+  it("accepts any of the documented creator types", () => {
+    expect(waitlistSchema.safeParse({ ...base, creatorType: "TikTok" }).success).toBe(true);
+  });
+
+  it("rejects a creatorType outside the fixed CREATOR_TYPES list", () => {
+    expect(waitlistSchema.safeParse({ ...base, creatorType: "Podcaster" }).success).toBe(false);
+  });
+
+  it("rejects a non-empty honeypot value (bot signal)", () => {
+    expect(waitlistSchema.safeParse({ ...base, website: "http://spam.example" }).success).toBe(false);
+  });
+
+  it("accepts an empty or omitted honeypot value (real visitor)", () => {
+    expect(waitlistSchema.safeParse({ ...base, website: "" }).success).toBe(true);
+    expect(waitlistSchema.safeParse({ email: base.email, consent: true }).success).toBe(true);
   });
 });
 

@@ -1,12 +1,14 @@
 "use client";
 
 import { useActionState, useState } from "react";
+import { Alert, Badge, Button, useActionToast } from "@/components/ui";
 import { approveReference, rejectReference, uploadReference } from "./actions";
 
 const initialState = { error: "" };
 
 export function UploadReferenceForm({ characterId }: { characterId: string }) {
   const [state, formAction, pending] = useActionState(uploadReference, initialState);
+  useActionToast(state, pending, "Reference image uploaded.");
 
   return (
     <form action={formAction} className="flex flex-col gap-2">
@@ -16,20 +18,13 @@ export function UploadReferenceForm({ characterId }: { characterId: string }) {
         name="file"
         accept="image/*"
         required
+        aria-label="Reference image file"
         className="text-sm file:mr-3 file:h-11 file:rounded-lg file:border file:border-border file:bg-surface file:px-3 file:text-sm"
       />
-      {state.error && (
-        <p role="alert" className="text-xs text-red-400">
-          {state.error}
-        </p>
-      )}
-      <button
-        type="submit"
-        disabled={pending}
-        className="h-11 w-fit rounded-lg border border-border px-4 text-sm hover:bg-surface-raised disabled:cursor-not-allowed disabled:opacity-60"
-      >
-        {pending ? "Uploading..." : "Upload reference image"}
-      </button>
+      {state.error && <Alert tone="danger">{state.error}</Alert>}
+      <Button type="submit" variant="secondary" size="sm" pending={pending} pendingLabel="Uploading…" className="w-fit">
+        Upload reference image
+      </Button>
     </form>
   );
 }
@@ -50,39 +45,42 @@ export function ReferenceCard({
   const [pendingAction, setPendingAction] = useState<"approve" | "reject" | null>(null);
 
   return (
-    <div className="flex flex-col gap-2 rounded-lg border border-border bg-surface p-2">
+    <div className="flex flex-col gap-2 rounded-xl border border-border bg-surface p-2">
       {/* eslint-disable-next-line @next/next/no-img-element -- signed private-storage URL, not an optimizable static asset */}
-      <img src={imageUrl} alt={viewType} className="w-full rounded" />
-      <div className="flex items-center justify-between">
+      <img src={imageUrl} alt={viewType} loading="lazy" className="w-full rounded" />
+      <div className="flex items-center justify-between gap-2">
         <p className="text-xs text-muted">
           {viewType} · {source}
         </p>
-        {approved && <span className="text-[10px] uppercase text-accent-teal">Approved</span>}
+        {approved && <Badge tone="success">Approved</Badge>}
       </div>
       {!approved && (
         <div className="flex gap-2">
-          <form
-            action={approveReference}
-            onSubmit={() => setPendingAction("approve")}
-          >
+          <form action={approveReference} onSubmit={() => setPendingAction("approve")}>
             <input type="hidden" name="referenceId" value={referenceId} />
-            <button
+            <Button
               type="submit"
+              size="sm"
+              variant="secondary"
               disabled={pendingAction !== null}
-              className="h-11 rounded-lg border border-accent-teal/40 px-3 text-xs text-accent-teal hover:bg-surface-raised disabled:opacity-60"
+              pending={pendingAction === "approve"}
+              pendingLabel="Approving…"
             >
-              {pendingAction === "approve" ? "Approving..." : "Approve"}
-            </button>
+              Approve
+            </Button>
           </form>
           <form action={rejectReference} onSubmit={() => setPendingAction("reject")}>
             <input type="hidden" name="referenceId" value={referenceId} />
-            <button
+            <Button
               type="submit"
+              size="sm"
+              variant="ghost"
               disabled={pendingAction !== null}
-              className="h-11 rounded-lg border border-border px-3 text-xs text-muted hover:bg-surface-raised disabled:opacity-60"
+              pending={pendingAction === "reject"}
+              pendingLabel="Removing…"
             >
-              {pendingAction === "reject" ? "Removing..." : "Reject"}
-            </button>
+              Reject
+            </Button>
           </form>
         </div>
       )}

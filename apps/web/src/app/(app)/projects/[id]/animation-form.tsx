@@ -1,7 +1,9 @@
 "use client";
 
 import { useActionState, useState } from "react";
+import { Button, useActionToast } from "@/components/ui";
 import { requestAnimation } from "./actions";
+import { GenerateError } from "./generate-error";
 
 const initialState = { error: "" };
 
@@ -14,24 +16,24 @@ export function GenerateAnimationForm({
 }) {
   const [state, formAction, pending] = useActionState(requestAnimation, initialState);
   const [idempotencyKey] = useState(() => crypto.randomUUID());
+  useActionToast(state, pending, "Animation requested — confirm the cost estimate to start.");
 
   return (
     <form action={formAction} className="flex flex-col gap-3">
       <input type="hidden" name="projectId" value={projectId} />
       <input type="hidden" name="idempotencyKey" value={idempotencyKey} />
       {disabledReason && <p className="text-sm text-muted">{disabledReason}</p>}
-      {state.error && (
-        <p role="alert" className="text-sm text-red-400">
-          {state.error}
-        </p>
-      )}
-      <button
+      <GenerateError error={state.error} />
+
+      <Button
         type="submit"
-        disabled={pending || Boolean(disabledReason)}
-        className="h-11 w-fit rounded-lg bg-gradient-to-r from-accent-purple via-accent-blue to-accent-teal px-4 font-medium text-black disabled:cursor-not-allowed disabled:opacity-60"
+        pending={pending}
+        pendingLabel="Estimating cost…"
+        disabled={Boolean(disabledReason)}
+        className="w-fit"
       >
-        {pending ? "Estimating cost..." : "Animate visuals"}
-      </button>
+        Animate visuals
+      </Button>
     </form>
   );
 }

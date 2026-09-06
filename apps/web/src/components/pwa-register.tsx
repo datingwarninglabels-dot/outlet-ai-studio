@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { Button } from "@/components/ui";
 
 /**
  * Section 20: "Safe update behavior." Registers sw.js and, when a new
@@ -64,13 +65,9 @@ export function PwaRegister() {
   return (
     <div className="fixed bottom-4 left-1/2 z-50 flex -translate-x-1/2 items-center gap-3 rounded-lg border border-border bg-surface px-4 py-3 text-sm shadow-lg">
       <span>A new version is available.</span>
-      <button
-        type="button"
-        onClick={() => waitingWorker?.postMessage("SKIP_WAITING")}
-        className="h-11 rounded-lg bg-gradient-to-r from-accent-purple via-accent-blue to-accent-teal px-4 font-medium text-black"
-      >
+      <Button type="button" size="sm" onClick={() => waitingWorker?.postMessage("SKIP_WAITING")}>
         Update
-      </button>
+      </Button>
     </div>
   );
 }

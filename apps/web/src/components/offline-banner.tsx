@@ -10,9 +10,11 @@ import { useEffect, useState } from "react";
  * silently fail with a confusing network error.
  */
 export function OfflineBanner() {
-  const [isOffline, setIsOffline] = useState(() => typeof navigator !== "undefined" && !navigator.onLine);
+  const [isOffline, setIsOffline] = useState(false);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- syncing from navigator.onLine, a genuinely external browser API with no render-derivable value
+    setIsOffline(!navigator.onLine);
     const goOffline = () => setIsOffline(true);
     const goOnline = () => setIsOffline(false);
     window.addEventListener("offline", goOffline);

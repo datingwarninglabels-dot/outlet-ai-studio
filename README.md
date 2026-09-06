@@ -91,10 +91,18 @@ how a job goes from a confirm/retry click to an async task run.
 
 ## Security notes
 
-- There is no public sign-up. The Owner account is created once via
-  `/setup`, which locks itself after the first account exists.
-- Google sign-in only succeeds for an email that's already the bootstrapped
-  Owner — it will not silently create a second account for any Google user.
+- The Owner account is created once via `/setup`, which locks itself after
+  the first account exists. Since Phase 2 Milestone 2, customers can also
+  self-register at `/register` (Owner/Customer roles are enforced
+  server-side; Owner-only screens like Provider Hub are gated in
+  `auth.config.ts` and in the page itself).
+- Google sign-in and credential registration both create ordinary Customer
+  accounts. The Owner role is only ever set by the `/setup` bootstrap.
+- Password reset is available at `/forgot-password` → `/reset-password`.
+  Tokens are single-use, expire in one hour, and only their hash is stored.
+  Email delivery uses Resend — set `RESEND_API_KEY` and `EMAIL_FROM`; if
+  they're unset, the reset link is logged to the server console in
+  development instead.
 - Provider credentials are environment-variable-only for now (Provider Hub
   shows what's configured but doesn't store secrets itself yet — see
   PLAN.md's M2 section for the deliberate scope limit and what a DB-backed

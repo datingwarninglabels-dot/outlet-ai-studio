@@ -1,6 +1,7 @@
 "use client";
 
 import { useActionState } from "react";
+import { Alert, Button, Card, useActionToast } from "@/components/ui";
 
 type ActionState = { error: string };
 type Action = (prev: ActionState, formData: FormData) => Promise<ActionState>;
@@ -26,9 +27,12 @@ export function JobConfirmCard({
 }) {
   const [confirmState, confirmFormAction, confirming] = useActionState(confirmAction, initialState);
   const [cancelState, cancelFormAction, cancelling] = useActionState(cancelAction, initialState);
+  const error = confirmState.error || cancelState.error;
+  useActionToast(confirmState, confirming, `Started ${label}.`);
+  useActionToast(cancelState, cancelling, `Cancelled ${label} — no cost incurred.`);
 
   return (
-    <div className="flex flex-col gap-3 rounded-lg border border-accent-teal/40 bg-surface p-4">
+    <Card tone="accent" className="flex flex-col gap-3 p-4">
       <p className="text-sm">
         Estimated cost for {label}: <strong>${(estimatedCostCents / 100).toFixed(2)}</strong>{" "}
         <span className="text-muted">
@@ -36,34 +40,22 @@ export function JobConfirmCard({
           {model ? `/${model}` : ""}, estimate only — not a guarantee)
         </span>
       </p>
-      {(confirmState.error || cancelState.error) && (
-        <p role="alert" className="text-sm text-red-400">
-          {confirmState.error || cancelState.error}
-        </p>
-      )}
-      <div className="flex gap-2">
+      {error && <Alert tone="danger">{error}</Alert>}
+      <div className="flex flex-wrap gap-2">
         <form action={confirmFormAction}>
           <input type="hidden" name="jobId" value={jobId} />
-          <button
-            type="submit"
-            disabled={confirming || cancelling}
-            className="h-11 rounded-lg bg-gradient-to-r from-accent-purple via-accent-blue to-accent-teal px-4 text-sm font-medium text-black disabled:opacity-60"
-          >
-            {confirming ? "Generating..." : "Confirm & generate"}
-          </button>
+          <Button type="submit" size="sm" pending={confirming} pendingLabel="Generating…" disabled={cancelling}>
+            Confirm &amp; generate
+          </Button>
         </form>
         <form action={cancelFormAction}>
           <input type="hidden" name="jobId" value={jobId} />
-          <button
-            type="submit"
-            disabled={confirming || cancelling}
-            className="h-11 rounded-lg border border-border px-4 text-sm text-muted disabled:opacity-60"
-          >
+          <Button type="submit" size="sm" variant="secondary" pending={cancelling} disabled={confirming}>
             Cancel
-          </button>
+          </Button>
         </form>
       </div>
-    </div>
+    </Card>
   );
 }
 
@@ -77,28 +69,21 @@ export function StalledJobCard({
   retryAction: Action;
 }) {
   const [state, formAction, pending] = useActionState(retryAction, initialState);
+  useActionToast(state, pending, `Retrying ${label.toLowerCase()}.`);
 
   return (
-    <div className="flex flex-col gap-3 rounded-lg border border-red-400/40 bg-surface p-4">
-      <p className="text-sm text-red-400">
-        {label} appears to have stalled — no update in a while. It hasn&apos;t been lost; retrying
-        resumes this same job.
+    <Card tone="danger" className="flex flex-col gap-3 p-4">
+      <p className="text-sm text-danger">
+        {label} appears to have stalled — no update in a while. It hasn&apos;t been lost; retrying resumes this same
+        job.
       </p>
-      {state.error && (
-        <p role="alert" className="text-sm text-red-400">
-          {state.error}
-        </p>
-      )}
+      {state.error && <Alert tone="danger">{state.error}</Alert>}
       <form action={formAction}>
         <input type="hidden" name="jobId" value={jobId} />
-        <button
-          type="submit"
-          disabled={pending}
-          className="h-11 w-fit rounded-lg border border-border px-4 text-sm disabled:opacity-60"
-        >
-          {pending ? "Retrying..." : "Retry"}
-        </button>
+        <Button type="submit" size="sm" variant="secondary" pending={pending} pendingLabel="Retrying…">
+          Retry
+        </Button>
       </form>
-    </div>
+    </Card>
   );
 }

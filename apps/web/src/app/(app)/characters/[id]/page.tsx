@@ -1,6 +1,7 @@
 import { desc, eq } from "drizzle-orm";
 import { notFound } from "next/navigation";
 import { auth } from "@/auth";
+import { Alert, Button, PageHeader } from "@/components/ui";
 import { db } from "@/db";
 import { characterReferences, generationJobs, usageCosts } from "@/db/schema";
 import { loadOwnedCharacter } from "@/lib/authz";
@@ -65,19 +66,19 @@ export default async function CharacterDetailPage({ params }: { params: Promise<
       : null;
 
   return (
-    <div className="flex max-w-2xl flex-col gap-8">
-      <div>
-        <h1 className="text-2xl font-semibold">{character.name}</h1>
-        {character.isRealPerson && (
-          <p className="mt-1 text-xs text-muted">
-            Real person — permission notes: {character.permissionNotes}
-          </p>
-        )}
-      </div>
+    <div className="flex max-w-2xl flex-col gap-6">
+      <PageHeader
+        title={character.name}
+        description={
+          character.isRealPerson
+            ? `Real person — permission notes: ${character.permissionNotes}`
+            : undefined
+        }
+      />
 
-      <details className="rounded-lg border border-border bg-surface p-4">
-        <summary className="cursor-pointer text-sm font-medium">Edit character</summary>
-        <div className="mt-4">
+      <details className="rounded-xl border border-border bg-surface">
+        <summary className="cursor-pointer px-4 py-3 text-sm font-medium text-foreground">Edit character</summary>
+        <div className="border-t border-border p-4">
           <CharacterForm
             action={updateCharacter}
             characterId={character.id}
@@ -104,7 +105,7 @@ export default async function CharacterDetailPage({ params }: { params: Promise<
       </details>
 
       <section className="flex flex-col gap-3">
-        <h2 className="text-sm font-medium text-muted">Reference images</h2>
+        <h2 className="text-sm font-semibold text-muted">Reference images</h2>
         <UploadReferenceForm characterId={character.id} />
 
         {refCards.length > 0 && (
@@ -130,7 +131,7 @@ export default async function CharacterDetailPage({ params }: { params: Promise<
       </section>
 
       <section className="flex flex-col gap-3">
-        <h2 className="text-sm font-medium text-muted">Generate images</h2>
+        <h2 className="text-sm font-semibold text-muted">Generate images</h2>
 
         {imagesJob?.status === "awaiting_confirmation" && imagesCost && (
           <JobConfirmCard
@@ -147,9 +148,9 @@ export default async function CharacterDetailPage({ params }: { params: Promise<
           <StalledJobCard jobId={imagesJob.id} label="Character image generation" retryAction={retryCharacterImages} />
         )}
         {imagesJob?.status === "failed" && (
-          <p className="rounded-lg border border-dashed border-red-400/40 p-4 text-sm text-red-400">
-            Generation failed: {imagesJob.error}
-          </p>
+          <Alert tone="danger" title="Generation failed">
+            {imagesJob.error}
+          </Alert>
         )}
 
         <div className="flex flex-col gap-2">
@@ -160,12 +161,9 @@ export default async function CharacterDetailPage({ params }: { params: Promise<
 
       <form action={deleteCharacter}>
         <input type="hidden" name="characterId" value={character.id} />
-        <button
-          type="submit"
-          className="h-11 w-fit rounded-lg border border-red-400/40 px-4 text-sm text-red-400 hover:bg-red-400/10"
-        >
+        <Button type="submit" variant="danger" size="sm">
           Delete character (permanent — removes all reference images from storage too)
-        </button>
+        </Button>
       </form>
     </div>
   );

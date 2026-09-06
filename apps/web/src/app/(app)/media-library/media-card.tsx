@@ -60,12 +60,12 @@ export function MediaCard({
       <div className="flex h-32 items-center justify-center overflow-hidden rounded bg-background">
         {kind === "image" && (
           // eslint-disable-next-line @next/next/no-img-element -- signed private-storage URL, not an optimizable static asset
-          <img src={url} alt={displayName} className="h-full w-full object-cover" />
+          <img src={url} alt={displayName} loading="lazy" className="h-full w-full object-cover" />
         )}
-        {kind === "video" && <video controls src={url} className="h-full w-full object-cover" />}
+        {kind === "video" && <video controls preload="none" src={url} className="h-full w-full object-cover" />}
         {kind === "audio" && <audio controls src={url} className="w-full px-2" />}
         {kind === "other" && (
-          <a href={url} className="text-xs text-accent-teal underline">
+          <a href={url} className="text-xs text-accent underline">
             Download to preview
           </a>
         )}
@@ -82,12 +82,16 @@ export function MediaCard({
 
       <form action={renameAction} className="flex gap-1">
         <input type="hidden" name="mediaAssetId" value={asset.id} />
+        <label htmlFor={`rename-${asset.id}`} className="sr-only">
+          Rename this asset
+        </label>
         <input
+          id={`rename-${asset.id}`}
           name="name"
           defaultValue={asset.name ?? ""}
           placeholder="Rename..."
           maxLength={200}
-          className="h-11 flex-1 rounded border border-border bg-background px-2 text-xs outline-none focus-visible:border-accent-teal"
+          className="h-11 flex-1 rounded border border-border bg-background px-2 text-xs outline-none focus-visible:border-accent"
         />
         <button
           type="submit"
@@ -97,16 +101,20 @@ export function MediaCard({
           {renaming ? "..." : "Save"}
         </button>
       </form>
-      {renameState.error && <p className="text-xs text-red-400">{renameState.error}</p>}
+      {renameState.error && <p className="text-xs text-danger">{renameState.error}</p>}
 
       <form action={tagsAction} className="flex gap-1">
         <input type="hidden" name="mediaAssetId" value={asset.id} />
+        <label htmlFor={`tags-${asset.id}`} className="sr-only">
+          Tags for this asset, comma-separated
+        </label>
         <input
+          id={`tags-${asset.id}`}
           name="tags"
           defaultValue={asset.tags.join(", ")}
           placeholder="tags, comma-separated"
           maxLength={300}
-          className="h-11 flex-1 rounded border border-border bg-background px-2 text-xs outline-none focus-visible:border-accent-teal"
+          className="h-11 flex-1 rounded border border-border bg-background px-2 text-xs outline-none focus-visible:border-accent"
         />
         <button
           type="submit"
@@ -116,7 +124,7 @@ export function MediaCard({
           {savingTags ? "..." : "Tag"}
         </button>
       </form>
-      {tagsState.error && <p className="text-xs text-red-400">{tagsState.error}</p>}
+      {tagsState.error && <p className="text-xs text-danger">{tagsState.error}</p>}
 
       {isStandaloneUpload && projects.length > 0 && (
         <form action={assignAction} className="flex gap-1">
@@ -124,7 +132,7 @@ export function MediaCard({
           <select
             name="projectId"
             defaultValue={asset.projectId ?? ""}
-            className="h-11 flex-1 rounded border border-border bg-background px-1 text-xs outline-none focus-visible:border-accent-teal"
+            className="h-11 flex-1 rounded border border-border bg-background px-1 text-xs outline-none focus-visible:border-accent"
           >
             <option value="">Shared library</option>
             {projects.map((p) => (
@@ -142,7 +150,7 @@ export function MediaCard({
           </button>
         </form>
       )}
-      {assignState.error && <p className="text-xs text-red-400">{assignState.error}</p>}
+      {assignState.error && <p className="text-xs text-danger">{assignState.error}</p>}
 
       <div className="flex gap-2">
         <a
@@ -158,13 +166,13 @@ export function MediaCard({
             <button
               type="submit"
               disabled={trashing}
-              className="h-11 w-full rounded border border-red-400/40 px-2 text-xs text-red-400 hover:bg-red-400/10 disabled:opacity-60"
+              className="h-11 w-full rounded border border-danger/40 px-2 text-xs text-danger hover:bg-danger-soft disabled:opacity-60"
             >
               {trashing ? "..." : "Move to Trash"}
             </button>
           </form>
         ) : (
-          <p className="flex h-11 flex-1 items-center justify-center text-center text-[10px] text-muted">
+          <p className="flex h-11 flex-1 items-center justify-center text-center text-xs text-muted">
             Generated — manage from its own page
           </p>
         )}
@@ -205,7 +213,7 @@ export function TrashCard({
           <button
             type="submit"
             disabled={deleting}
-            className="h-11 rounded border border-red-400/40 px-3 text-xs text-red-400 hover:bg-red-400/10 disabled:opacity-60"
+            className="h-11 rounded border border-danger/40 px-3 text-xs text-danger hover:bg-danger-soft disabled:opacity-60"
           >
             {deleting ? "..." : "Delete permanently"}
           </button>

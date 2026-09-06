@@ -2,7 +2,16 @@ import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { characterReferences, characters, generationJobs, mediaAssets } from "@/db/schema";
 import { buildCharacterPrompt } from "@/lib/character-prompt";
-import { completeJob, completeStep, failJob, failStep, publicErrorMessage, startStep, withRetry } from "@/lib/jobs";
+import {
+  completeJob,
+  completeStep,
+  failJob,
+  failStep,
+  publicErrorMessage,
+  recordActualCostFromEstimate,
+  startStep,
+  withRetry,
+} from "@/lib/jobs";
 import { imageProvider } from "@/lib/providers";
 import { storageProvider } from "@/lib/storage-instance";
 import { defineJobTask } from "./lib/job-task";
@@ -65,6 +74,7 @@ export async function executeCharacterImagesJob(job: typeof generationJobs.$infe
       const [asset] = await db
         .insert(mediaAssets)
         .values({
+          ownerId: character.ownerId,
           projectId: null,
           jobId: job.id,
           type: "character_reference",
@@ -94,6 +104,7 @@ export async function executeCharacterImagesJob(job: typeof generationJobs.$infe
     }
   }
 
+  await recordActualCostFromEstimate(job.id);
   await completeJob(job.id);
   return null;
 }

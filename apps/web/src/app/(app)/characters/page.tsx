@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { auth } from "@/auth";
+import { Badge, EmptyState, PageHeader } from "@/components/ui";
 import { createCharacter, listOwnedCharacters } from "./actions";
 import { CharacterForm } from "./character-form";
 
@@ -10,43 +11,32 @@ export default async function CharactersPage() {
   const ownedCharacters = session?.user ? await listOwnedCharacters(session.user.id) : [];
 
   return (
-    <div className="flex max-w-2xl flex-col gap-8">
-      <div>
-        <h1 className="text-2xl font-semibold">Character Library</h1>
-        <p className="mt-1 text-sm text-muted">
-          Reusable characters with locked appearance details — upload or generate reference images,
-          approve them, then run a cheap consistency test before a full character sheet. Assign a
-          character to a scene on its project page to keep visuals consistent and get continuity
-          warnings if a generated image drifts from the locked details.
-        </p>
-      </div>
+    <div className="flex max-w-2xl flex-col gap-6">
+      <PageHeader
+        title="Characters"
+        description="Reusable characters with locked appearance details. Upload or generate reference images, approve them, then run a cheap consistency test before a full character sheet. Assign a character to a scene to keep visuals consistent and get continuity warnings if a generated image drifts."
+      />
 
-      <details className="rounded-lg border border-border bg-surface p-4">
-        <summary className="cursor-pointer text-sm font-medium">New character</summary>
-        <div className="mt-4">
+      <details className="rounded-xl border border-border bg-surface">
+        <summary className="cursor-pointer px-4 py-3 text-sm font-medium text-foreground">New character</summary>
+        <div className="border-t border-border p-4">
           <CharacterForm action={createCharacter} submitLabel="Create character" />
         </div>
       </details>
 
       {ownedCharacters.length === 0 ? (
-        <p className="rounded-lg border border-dashed border-border p-6 text-sm text-muted">
-          No characters yet.
-        </p>
+        <EmptyState title="No characters yet" description="Create one above to reuse it across projects." />
       ) : (
         <ul className="flex flex-col gap-2">
           {ownedCharacters.map((character) => (
             <li key={character.id}>
               <Link
                 href={`/characters/${character.id}`}
-                className="flex items-center justify-between rounded-lg border border-border bg-surface p-4 text-sm hover:bg-surface-raised"
+                className="flex items-center justify-between gap-3 rounded-xl border border-border bg-surface p-4 text-sm transition-colors hover:border-border-strong hover:bg-surface-raised"
               >
-                <span>
-                  {character.name}
-                  {character.isRealPerson && (
-                    <span className="ml-2 rounded-full border border-border px-2 py-0.5 text-[10px] uppercase tracking-wide text-muted">
-                      Real person
-                    </span>
-                  )}
+                <span className="flex items-center gap-2">
+                  <span className="font-medium text-foreground">{character.name}</span>
+                  {character.isRealPerson && <Badge>Real person</Badge>}
                 </span>
                 <span className="max-w-xs truncate text-xs text-muted">{character.description}</span>
               </Link>

@@ -1,11 +1,12 @@
 "use client";
 
 import { useActionState } from "react";
+import { Alert, Button, Field, Input, useActionToast } from "@/components/ui";
 import { updateBrandKit, uploadIntro, uploadLogo, uploadOutro } from "./actions";
 
 const initialState = { error: "" };
 
-function Field({
+function TextField({
   label,
   name,
   defaultValue,
@@ -17,19 +18,9 @@ function Field({
   placeholder?: string;
 }) {
   return (
-    <div className="flex flex-col gap-1">
-      <label htmlFor={name} className="text-xs text-muted">
-        {label}
-      </label>
-      <input
-        id={name}
-        name={name}
-        defaultValue={defaultValue ?? ""}
-        placeholder={placeholder}
-        maxLength={300}
-        className="h-11 rounded-lg border border-border bg-surface px-3 text-sm outline-none focus-visible:border-accent-teal"
-      />
-    </div>
+    <Field id={name} label={label}>
+      <Input name={name} defaultValue={defaultValue ?? ""} placeholder={placeholder} maxLength={300} />
+    </Field>
   );
 }
 
@@ -48,45 +39,37 @@ export function BrandKitForm({
   };
 }) {
   const [state, formAction, pending] = useActionState(updateBrandKit, initialState);
+  useActionToast(state, pending, "Brand Kit saved.");
 
   return (
     <form action={formAction} className="flex flex-col gap-4">
-      <div className="flex flex-col gap-1">
-        <label htmlFor="colors" className="text-xs text-muted">
-          Brand colors (comma-separated hex, up to 6)
-        </label>
-        <input
-          id="colors"
+      <Field id="colors" label="Brand colors" hint="Comma-separated hex, up to 6.">
+        <Input
           name="colors"
           defaultValue={defaults.colors.join(", ")}
           placeholder="#3366FF, #1A1A2E"
           maxLength={300}
-          className="h-11 rounded-lg border border-border bg-surface px-3 text-sm outline-none focus-visible:border-accent-teal"
         />
-        {defaults.colors.length > 0 && (
-          <div className="mt-1 flex gap-2">
-            {defaults.colors.map((c) => (
-              <span key={c} title={c} className="h-6 w-6 rounded-full border border-border" style={{ backgroundColor: c }} />
-            ))}
-          </div>
-        )}
-      </div>
+      </Field>
+      {defaults.colors.length > 0 && (
+        <div className="-mt-2 flex gap-2">
+          {defaults.colors.map((c) => (
+            <span key={c} title={c} className="h-6 w-6 rounded-full border border-border" style={{ backgroundColor: c }} />
+          ))}
+        </div>
+      )}
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-        <Field label="Fonts" name="fonts" defaultValue={defaults.fonts} placeholder="Montserrat, Arial" />
-        <Field
-          label="Default voice ID (ElevenLabs, optional)"
-          name="defaultVoiceId"
-          defaultValue={defaults.defaultVoiceId}
-        />
-        <Field
+        <TextField label="Fonts" name="fonts" defaultValue={defaults.fonts} placeholder="Montserrat, Arial" />
+        <TextField label="Default voice ID (ElevenLabs)" name="defaultVoiceId" defaultValue={defaults.defaultVoiceId} />
+        <TextField
           label="Default visual style"
           name="defaultVisualStyle"
           defaultValue={defaults.defaultVisualStyle}
           placeholder="cinematic realism, warm tones"
         />
-        <Field label="Default music mood" name="defaultMusicMood" defaultValue={defaults.defaultMusicMood} />
-        <Field
+        <TextField label="Default music mood" name="defaultMusicMood" defaultValue={defaults.defaultMusicMood} />
+        <TextField
           label="Caption style (descriptive)"
           name="captionStyle"
           defaultValue={defaults.captionStyle}
@@ -98,21 +81,13 @@ export function BrandKitForm({
         <input type="checkbox" name="watermarkEnabled" defaultChecked={defaults.watermarkEnabled} />
         Show a watermark
       </label>
-      <Field label="Watermark text" name="watermarkText" defaultValue={defaults.watermarkText} />
+      <TextField label="Watermark text" name="watermarkText" defaultValue={defaults.watermarkText} />
 
-      {state.error && (
-        <p role="alert" className="text-sm text-red-400">
-          {state.error}
-        </p>
-      )}
+      {state.error && <Alert tone="danger">{state.error}</Alert>}
 
-      <button
-        type="submit"
-        disabled={pending}
-        className="h-11 w-fit rounded-lg bg-gradient-to-r from-accent-purple via-accent-blue to-accent-teal px-4 font-medium text-black disabled:cursor-not-allowed disabled:opacity-60"
-      >
-        {pending ? "Saving..." : "Save Brand Kit"}
-      </button>
+      <Button type="submit" pending={pending} pendingLabel="Saving…" className="w-fit">
+        Save Brand Kit
+      </Button>
     </form>
   );
 }
@@ -129,16 +104,17 @@ function AssetUploadForm({
   currentUrl: string | null;
 }) {
   const [state, formAction, pending] = useActionState(action, initialState);
+  useActionToast(state, pending, `${label} uploaded.`);
 
   return (
-    <div className="flex flex-col gap-2 rounded-lg border border-border bg-surface p-4">
-      <p className="text-sm font-medium">{label}</p>
+    <div className="flex flex-col gap-2 rounded-xl border border-border bg-surface p-4">
+      <p className="text-sm font-medium text-foreground">{label}</p>
       {currentUrl &&
         (accept === "image/*" ? (
           // eslint-disable-next-line @next/next/no-img-element -- signed private-storage URL, not an optimizable static asset
-          <img src={currentUrl} alt={label} className="h-24 w-auto rounded border border-border" />
+          <img src={currentUrl} alt={label} loading="lazy" className="h-24 w-auto rounded border border-border" />
         ) : (
-          <video controls src={currentUrl} className="h-24 w-auto rounded border border-border" />
+          <video controls preload="none" src={currentUrl} className="h-24 w-auto rounded border border-border" />
         ))}
       <form action={formAction} className="flex flex-col gap-2">
         <input
@@ -146,20 +122,13 @@ function AssetUploadForm({
           name="file"
           accept={accept}
           required
+          aria-label={`${label} file`}
           className="text-sm file:mr-3 file:h-11 file:rounded-lg file:border file:border-border file:bg-background file:px-3 file:text-sm"
         />
-        {state.error && (
-          <p role="alert" className="text-xs text-red-400">
-            {state.error}
-          </p>
-        )}
-        <button
-          type="submit"
-          disabled={pending}
-          className="h-11 w-fit rounded-lg border border-border px-3 text-sm hover:bg-surface-raised disabled:cursor-not-allowed disabled:opacity-60"
-        >
-          {pending ? "Uploading..." : currentUrl ? "Replace" : "Upload"}
-        </button>
+        {state.error && <Alert tone="danger">{state.error}</Alert>}
+        <Button type="submit" variant="secondary" size="sm" pending={pending} pendingLabel="Uploading…" className="w-fit">
+          {currentUrl ? "Replace" : "Upload"}
+        </Button>
       </form>
     </div>
   );

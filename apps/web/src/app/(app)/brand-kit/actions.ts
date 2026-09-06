@@ -104,6 +104,7 @@ async function uploadBrandAsset(
   const [asset] = await db
     .insert(mediaAssets)
     .values({
+      ownerId: session.user.id,
       projectId: null,
       type: assetType,
       storageKey: uploaded.key,

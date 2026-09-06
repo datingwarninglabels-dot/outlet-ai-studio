@@ -14,7 +14,16 @@ import {
 } from "@/db/schema";
 import { characterAppearanceSummary } from "@/lib/character-prompt";
 import { runContinuityCheck } from "@/lib/continuity-checker";
-import { completeJob, completeStep, failJob, failStep, publicErrorMessage, startStep, withRetry } from "@/lib/jobs";
+import {
+  completeJob,
+  completeStep,
+  failJob,
+  failStep,
+  publicErrorMessage,
+  recordActualCostFromEstimate,
+  startStep,
+  withRetry,
+} from "@/lib/jobs";
 import { imageProvider } from "@/lib/providers";
 import { storageProvider } from "@/lib/storage-instance";
 import { worldSettingSummary } from "@/lib/world-prompt";
@@ -44,6 +53,11 @@ export async function executeVisualJob(job: ProjectJob): Promise<string | null> 
   // unless this project set its own visualStyleOverride. Resolved once per
   // batch, not per scene — it doesn't vary scene to scene.
   const [projectRow] = await db.select().from(projects).where(eq(projects.id, job.projectId)).limit(1);
+  if (!projectRow) {
+    const msg = "This project no longer exists.";
+    await failJob(job.id, msg, msg);
+    return msg;
+  }
   const [brandKit] = projectRow
     ? await db.select().from(brandKits).where(eq(brandKits.ownerId, projectRow.ownerId)).limit(1)
     : [];
@@ -136,6 +150,7 @@ export async function executeVisualJob(job: ProjectJob): Promise<string | null> 
       const [asset] = await db
         .insert(mediaAssets)
         .values({
+          ownerId: projectRow.ownerId,
           projectId: job.projectId,
           jobId: job.id,
           sceneId,
@@ -182,6 +197,7 @@ export async function executeVisualJob(job: ProjectJob): Promise<string | null> 
     }
   }
 
+  await recordActualCostFromEstimate(job.id);
   await completeJob(job.id);
   return null;
 }

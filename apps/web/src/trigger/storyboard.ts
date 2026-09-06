@@ -1,7 +1,8 @@
 import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { generationJobs, scenes, scripts } from "@/db/schema";
-import { completeJob, completeStep, failJob, failStep, publicErrorMessage, startStep, withRetry } from "@/lib/jobs";
+import { computeGenerationCostCents } from "@/lib/cost-estimate";
+import { completeJob, completeStep, failJob, failStep, publicErrorMessage, recordActualCost, startStep, withRetry } from "@/lib/jobs";
 import { storyboardProvider } from "@/lib/providers";
 import { defineJobTask } from "./lib/job-task";
 
@@ -52,6 +53,14 @@ export async function executeStoryboardJob(job: ProjectJob): Promise<string | nu
     // breakdown — never silently drop that context, the Owner needs to know
     // to regenerate rather than assume the scene list is complete.
     await completeStep(stepId, { sceneCount: result.scenes.length, truncated: result.truncated });
+    await recordActualCost(
+      job.id,
+      computeGenerationCostCents({
+        model: result.model,
+        inputTokens: result.promptTokens,
+        outputTokens: result.completionTokens,
+      }),
+    );
     await completeJob(job.id);
     return null;
   } catch (err) {

@@ -1,7 +1,16 @@
 import { and, desc, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { generationJobs, mediaAssets, scenes } from "@/db/schema";
-import { completeJob, completeStep, failJob, failStep, publicErrorMessage, startStep, withRetry } from "@/lib/jobs";
+import {
+  completeJob,
+  completeStep,
+  failJob,
+  failStep,
+  publicErrorMessage,
+  recordActualCostFromEstimate,
+  startStep,
+  withRetry,
+} from "@/lib/jobs";
 import { videoProvider } from "@/lib/providers";
 import { storageProvider } from "@/lib/storage-instance";
 import { defineJobTask } from "./lib/job-task";
@@ -72,6 +81,7 @@ export async function executeAnimationJob(job: ProjectJob): Promise<string | nul
       });
 
       await db.insert(mediaAssets).values({
+        ownerId: imageAsset.ownerId,
         projectId: job.projectId,
         jobId: job.id,
         sceneId,
@@ -93,6 +103,7 @@ export async function executeAnimationJob(job: ProjectJob): Promise<string | nul
     }
   }
 
+  await recordActualCostFromEstimate(job.id);
   await completeJob(job.id);
   return null;
 }

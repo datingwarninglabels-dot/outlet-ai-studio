@@ -1,6 +1,7 @@
 "use client";
 
 import { useActionState, useState } from "react";
+import { Alert, Button, Input, useActionToast } from "@/components/ui";
 import { THUMBNAIL_STYLES } from "@/lib/validation";
 import { requestThumbnails, updateThumbnailText } from "./thumbnail-actions";
 
@@ -15,6 +16,7 @@ export function GenerateThumbnailsForm({
 }) {
   const [state, formAction, pending] = useActionState(requestThumbnails, initialState);
   const [idempotencyKey] = useState(() => crypto.randomUUID());
+  useActionToast(state, pending, "Thumbnails requested — confirm the cost estimate to start.");
 
   return (
     <form action={formAction} className="flex flex-col gap-3">
@@ -22,12 +24,12 @@ export function GenerateThumbnailsForm({
       <input type="hidden" name="idempotencyKey" value={idempotencyKey} />
       {disabledReason && <p className="text-sm text-muted">{disabledReason}</p>}
       <fieldset className="flex flex-col gap-2">
-        <legend className="mb-1 text-sm font-medium">Styles (pick up to 4)</legend>
+        <legend className="mb-1 text-sm font-medium text-foreground">Styles (pick up to 4)</legend>
         <div className="flex flex-wrap gap-2">
           {THUMBNAIL_STYLES.map((style) => (
             <label
               key={style.key}
-              className="flex items-center gap-2 rounded-lg border border-border bg-surface px-3 py-2 text-sm has-[:checked]:border-accent-teal"
+              className="flex items-center gap-2 rounded-lg border border-border bg-surface px-3 py-2 text-sm transition-colors has-[:checked]:border-accent has-[:checked]:bg-accent-soft"
             >
               <input
                 type="checkbox"
@@ -40,18 +42,16 @@ export function GenerateThumbnailsForm({
           ))}
         </div>
       </fieldset>
-      {state.error && (
-        <p role="alert" className="text-sm text-red-400">
-          {state.error}
-        </p>
-      )}
-      <button
+      {state.error && <Alert tone="danger">{state.error}</Alert>}
+      <Button
         type="submit"
-        disabled={pending || Boolean(disabledReason)}
-        className="h-11 w-fit rounded-lg bg-gradient-to-r from-accent-purple via-accent-blue to-accent-teal px-4 font-medium text-black disabled:cursor-not-allowed disabled:opacity-60"
+        pending={pending}
+        pendingLabel="Estimating cost…"
+        disabled={Boolean(disabledReason)}
+        className="w-fit"
       >
-        {pending ? "Estimating cost..." : "Generate thumbnails"}
-      </button>
+        Generate thumbnails
+      </Button>
     </form>
   );
 }
@@ -68,39 +68,27 @@ export function ThumbnailCard({
   headlineText: string;
 }) {
   const [state, formAction, pending] = useActionState(updateThumbnailText, initialState);
+  useActionToast(state, pending, "Headline updated.");
 
   return (
-    <div className="flex flex-col gap-2 rounded-lg border border-border bg-surface p-3">
+    <div className="flex flex-col gap-2 rounded-xl border border-border bg-surface p-3">
       {/* eslint-disable-next-line @next/next/no-img-element -- signed private-storage URL, not an optimizable static asset */}
-      <img src={imageUrl} alt={`${style} thumbnail`} className="w-full rounded" />
+      <img src={imageUrl} alt={`${style} thumbnail`} loading="lazy" className="w-full rounded" />
       <p className="text-xs uppercase tracking-wide text-muted">{style}</p>
 
       <form action={formAction} className="flex flex-col gap-2">
         <input type="hidden" name="thumbnailId" value={thumbnailId} />
-        <input
-          name="headlineText"
-          defaultValue={headlineText}
-          maxLength={120}
-          className="h-11 rounded-lg border border-border bg-background px-3 text-sm outline-none focus-visible:border-accent-teal"
-        />
-        {state.error && (
-          <p role="alert" className="text-xs text-red-400">
-            {state.error}
-          </p>
-        )}
-        <button
-          type="submit"
-          disabled={pending}
-          className="h-11 rounded-lg border border-border text-sm hover:bg-surface-raised disabled:cursor-not-allowed disabled:opacity-60"
-        >
-          {pending ? "Updating..." : "Update headline"}
-        </button>
+        <Input name="headlineText" aria-label={`Headline for ${style} thumbnail`} defaultValue={headlineText} maxLength={120} />
+        {state.error && <Alert tone="danger">{state.error}</Alert>}
+        <Button type="submit" variant="secondary" size="sm" pending={pending} pendingLabel="Updating…" fullWidth>
+          Update headline
+        </Button>
       </form>
 
       <div>
-        <p className="mb-1 text-[10px] text-muted">Readability at small size</p>
+        <p className="mb-1 text-xs text-muted">Readability at small size</p>
         {/* eslint-disable-next-line @next/next/no-img-element -- same signed URL, CSS-scaled for a readability check */}
-        <img src={imageUrl} alt="" className="w-20 rounded border border-border" />
+        <img src={imageUrl} alt="" loading="lazy" className="w-20 rounded border border-border" />
       </div>
     </div>
   );

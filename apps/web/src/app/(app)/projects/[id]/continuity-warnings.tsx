@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { Button } from "@/components/ui";
 import { acknowledgeContinuityCheck } from "./actions";
 
 export function ContinuityWarningsCard({
@@ -13,8 +14,8 @@ export function ContinuityWarningsCard({
   const [acknowledging, setAcknowledging] = useState(false);
 
   return (
-    <div className="flex flex-col gap-2 rounded-lg border border-amber-400/40 bg-surface p-3 text-xs">
-      <p className="font-medium text-amber-400">Continuity check flagged possible mismatches</p>
+    <div className="flex flex-col gap-2 rounded-xl border border-warning/40 bg-warning-soft p-3 text-xs">
+      <p className="font-medium text-warning">Continuity check flagged possible mismatches</p>
       <ul className="flex flex-col gap-1">
         {warnings.map((w, i) => (
           <li key={i} className="text-muted">
@@ -24,13 +25,9 @@ export function ContinuityWarningsCard({
       </ul>
       <form action={acknowledgeContinuityCheck} onSubmit={() => setAcknowledging(true)}>
         <input type="hidden" name="checkId" value={checkId} />
-        <button
-          type="submit"
-          disabled={acknowledging}
-          className="h-11 rounded-lg border border-border px-3 text-xs hover:bg-surface-raised disabled:opacity-60"
-        >
-          {acknowledging ? "Approving..." : "Approve — this change was intentional"}
-        </button>
+        <Button type="submit" variant="secondary" size="sm" pending={acknowledging} pendingLabel="Approving…">
+          Approve — this change was intentional
+        </Button>
       </form>
     </div>
   );

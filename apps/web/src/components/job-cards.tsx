@@ -1,7 +1,7 @@
 "use client";
 
 import { useActionState } from "react";
-import { Alert, Button, Card } from "@/components/ui";
+import { Alert, Button, Card, useActionToast } from "@/components/ui";
 
 type ActionState = { error: string };
 type Action = (prev: ActionState, formData: FormData) => Promise<ActionState>;
@@ -28,6 +28,8 @@ export function JobConfirmCard({
   const [confirmState, confirmFormAction, confirming] = useActionState(confirmAction, initialState);
   const [cancelState, cancelFormAction, cancelling] = useActionState(cancelAction, initialState);
   const error = confirmState.error || cancelState.error;
+  useActionToast(confirmState, confirming, `Started ${label}.`);
+  useActionToast(cancelState, cancelling, `Cancelled ${label} — no cost incurred.`);
 
   return (
     <Card tone="accent" className="flex flex-col gap-3 p-4">
@@ -67,6 +69,7 @@ export function StalledJobCard({
   retryAction: Action;
 }) {
   const [state, formAction, pending] = useActionState(retryAction, initialState);
+  useActionToast(state, pending, `Retrying ${label.toLowerCase()}.`);
 
   return (
     <Card tone="danger" className="flex flex-col gap-3 p-4">

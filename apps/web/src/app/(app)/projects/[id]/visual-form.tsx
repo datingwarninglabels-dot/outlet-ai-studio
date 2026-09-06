@@ -1,6 +1,7 @@
 "use client";
 
 import { useActionState, useState } from "react";
+import { Alert, Button, useActionToast } from "@/components/ui";
 import { requestVisual } from "./actions";
 
 const initialState = { error: "" };
@@ -14,24 +15,23 @@ export function GenerateVisualForm({
 }) {
   const [state, formAction, pending] = useActionState(requestVisual, initialState);
   const [idempotencyKey] = useState(() => crypto.randomUUID());
+  useActionToast(state, pending, "Visual generation requested — confirm the cost estimate to start.");
 
   return (
     <form action={formAction} className="flex flex-col gap-3">
       <input type="hidden" name="projectId" value={projectId} />
       <input type="hidden" name="idempotencyKey" value={idempotencyKey} />
       {disabledReason && <p className="text-sm text-muted">{disabledReason}</p>}
-      {state.error && (
-        <p role="alert" className="text-sm text-red-400">
-          {state.error}
-        </p>
-      )}
-      <button
+      {state.error && <Alert tone="danger">{state.error}</Alert>}
+      <Button
         type="submit"
-        disabled={pending || Boolean(disabledReason)}
-        className="h-11 w-fit rounded-lg bg-gradient-to-r from-accent-purple via-accent-blue to-accent-teal px-4 font-medium text-black disabled:cursor-not-allowed disabled:opacity-60"
+        pending={pending}
+        pendingLabel="Estimating cost…"
+        disabled={Boolean(disabledReason)}
+        className="w-fit"
       >
-        {pending ? "Estimating cost..." : "Generate visuals"}
-      </button>
+        Generate visuals
+      </Button>
     </form>
   );
 }

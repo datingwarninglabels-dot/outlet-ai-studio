@@ -1,6 +1,7 @@
 "use client";
 
 import { useActionState, useState } from "react";
+import { Alert, Button, Field, Input, Select, Textarea, useActionToast } from "@/components/ui";
 import { moveScene, requestStoryboard, updateScene } from "./actions";
 
 const initialState = { error: "" };
@@ -16,24 +17,23 @@ export function GenerateStoryboardForm({
 }) {
   const [state, formAction, pending] = useActionState(requestAction, initialState);
   const [idempotencyKey] = useState(() => crypto.randomUUID());
+  useActionToast(state, pending, "Storyboard requested — confirm the cost estimate to start.");
 
   return (
     <form action={formAction} className="flex flex-col gap-3">
       <input type="hidden" name="projectId" value={projectId} />
       <input type="hidden" name="idempotencyKey" value={idempotencyKey} />
       {disabledReason && <p className="text-sm text-muted">{disabledReason}</p>}
-      {state.error && (
-        <p role="alert" className="text-sm text-red-400">
-          {state.error}
-        </p>
-      )}
-      <button
+      {state.error && <Alert tone="danger">{state.error}</Alert>}
+      <Button
         type="submit"
-        disabled={pending || Boolean(disabledReason)}
-        className="h-11 w-fit rounded-lg bg-gradient-to-r from-accent-purple via-accent-blue to-accent-teal px-4 font-medium text-black disabled:cursor-not-allowed disabled:opacity-60"
+        pending={pending}
+        pendingLabel="Estimating cost…"
+        disabled={Boolean(disabledReason)}
+        className="w-fit"
       >
-        {pending ? "Estimating cost..." : "Generate storyboard"}
-      </button>
+        Generate storyboard
+      </Button>
     </form>
   );
 }
@@ -70,11 +70,12 @@ export function SceneEditForm({
 }) {
   const [state, formAction, pending] = useActionState(updateAction, initialState);
   const [moveState, moveFormAction, moving] = useActionState(moveAction, initialState);
+  useActionToast(state, pending, `Scene ${index + 1} saved.`);
 
   return (
-    <div className="flex flex-col gap-2 rounded-lg border border-border bg-surface p-4">
+    <div className="flex flex-col gap-3 rounded-xl border border-border bg-surface p-4">
       <div className="flex items-center justify-between">
-        <p className="text-sm font-medium">Scene {index + 1}</p>
+        <p className="text-sm font-semibold text-foreground">Scene {index + 1}</p>
         <div className="flex gap-1">
           <form action={moveFormAction}>
             <input type="hidden" name="projectId" value={projectId} />
@@ -84,7 +85,7 @@ export function SceneEditForm({
               type="submit"
               disabled={moving || index === 0}
               aria-label={`Move scene ${index + 1} up`}
-              className="h-11 w-11 rounded-lg border border-border text-sm hover:bg-surface-raised disabled:cursor-not-allowed disabled:opacity-40"
+              className="flex h-11 w-11 items-center justify-center rounded-lg border border-border text-sm hover:bg-surface-raised disabled:cursor-not-allowed disabled:opacity-40"
             >
               ↑
             </button>
@@ -97,7 +98,7 @@ export function SceneEditForm({
               type="submit"
               disabled={moving || index === sceneCount - 1}
               aria-label={`Move scene ${index + 1} down`}
-              className="h-11 w-11 rounded-lg border border-border text-sm hover:bg-surface-raised disabled:cursor-not-allowed disabled:opacity-40"
+              className="flex h-11 w-11 items-center justify-center rounded-lg border border-border text-sm hover:bg-surface-raised disabled:cursor-not-allowed disabled:opacity-40"
             >
               ↓
             </button>
@@ -109,130 +110,75 @@ export function SceneEditForm({
         <input type="hidden" name="projectId" value={projectId} />
         <input type="hidden" name="sceneId" value={scene.id} />
 
-        <div className="flex flex-col gap-1.5">
-          <label htmlFor={`narration-${scene.id}`} className="text-sm font-medium">
-            Narration
-          </label>
-          <textarea
-            id={`narration-${scene.id}`}
-            name="narration"
-            required
-            minLength={1}
-            maxLength={4000}
-            rows={3}
-            defaultValue={scene.narration}
-            className="rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus-visible:border-accent-teal"
-          />
-        </div>
+        <Field id={`narration-${scene.id}`} label="Narration">
+          <Textarea name="narration" required minLength={1} maxLength={4000} rows={3} defaultValue={scene.narration} />
+        </Field>
 
-        <div className="flex flex-col gap-1.5">
-          <label htmlFor={`visualDescription-${scene.id}`} className="text-sm font-medium">
-            Visual description
-          </label>
-          <textarea
-            id={`visualDescription-${scene.id}`}
+        <Field id={`visualDescription-${scene.id}`} label="Visual description">
+          <Textarea
             name="visualDescription"
             required
             minLength={1}
             maxLength={2000}
             rows={2}
             defaultValue={scene.visualDescription}
-            className="rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus-visible:border-accent-teal"
           />
-        </div>
+        </Field>
 
-        <div className="flex flex-col gap-1.5">
-          <label htmlFor={`audioDirection-${scene.id}`} className="text-sm font-medium">
-            Audio direction
-          </label>
-          <input
-            id={`audioDirection-${scene.id}`}
-            name="audioDirection"
-            maxLength={500}
-            defaultValue={scene.audioDirection}
-            placeholder="none"
-            className="h-11 rounded-lg border border-border bg-background px-3 text-sm outline-none focus-visible:border-accent-teal"
-          />
-        </div>
+        <Field id={`audioDirection-${scene.id}`} label="Audio direction" optional>
+          <Input name="audioDirection" maxLength={500} defaultValue={scene.audioDirection} placeholder="none" />
+        </Field>
 
-        <div className="flex flex-col gap-1.5">
-          <label htmlFor={`durationSeconds-${scene.id}`} className="text-sm font-medium">
-            Duration (seconds)
-          </label>
-          <input
-            id={`durationSeconds-${scene.id}`}
+        <Field id={`durationSeconds-${scene.id}`} label="Duration (seconds)">
+          <Input
             name="durationSeconds"
             type="number"
             required
             min={1}
             max={3600}
             defaultValue={scene.durationSeconds ?? 30}
-            className="h-11 w-32 rounded-lg border border-border bg-background px-3 text-sm outline-none focus-visible:border-accent-teal"
+            className="w-32"
           />
-        </div>
+        </Field>
 
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <div className="flex flex-col gap-1.5">
-            <label htmlFor={`characterId-${scene.id}`} className="text-sm font-medium">
-              Character (optional)
-            </label>
-            <select
-              id={`characterId-${scene.id}`}
-              name="characterId"
-              defaultValue={scene.characterId ?? ""}
-              className="h-11 rounded-lg border border-border bg-background px-3 text-sm outline-none focus-visible:border-accent-teal"
-            >
+          <Field id={`characterId-${scene.id}`} label="Character" optional>
+            <Select name="characterId" defaultValue={scene.characterId ?? ""}>
               <option value="">None</option>
               {ownedCharacters.map((c) => (
                 <option key={c.id} value={c.id}>
                   {c.name}
                 </option>
               ))}
-            </select>
-          </div>
-          <div className="flex flex-col gap-1.5">
-            <label htmlFor={`worldId-${scene.id}`} className="text-sm font-medium">
-              World (optional)
-            </label>
-            <select
-              id={`worldId-${scene.id}`}
-              name="worldId"
-              defaultValue={scene.worldId ?? ""}
-              className="h-11 rounded-lg border border-border bg-background px-3 text-sm outline-none focus-visible:border-accent-teal"
-            >
+            </Select>
+          </Field>
+          <Field id={`worldId-${scene.id}`} label="World" optional>
+            <Select name="worldId" defaultValue={scene.worldId ?? ""}>
               <option value="">None</option>
               {ownedWorlds.map((w) => (
                 <option key={w.id} value={w.id}>
                   {w.name}
                 </option>
               ))}
-            </select>
-          </div>
+            </Select>
+          </Field>
         </div>
         {(scene.characterId || scene.worldId) && (
           <p className="text-xs text-muted">
-            Visual generation will try to match this assignment&apos;s locked appearance/setting
-            details and run a continuity check after generating.
+            Visual generation will try to match this assignment&apos;s locked appearance/setting details and run a
+            continuity check after generating.
           </p>
         )}
 
-        {(state.error || moveState.error) && (
-          <p role="alert" className="text-sm text-red-400">
-            {state.error || moveState.error}
-          </p>
-        )}
+        {(state.error || moveState.error) && <Alert tone="danger">{state.error || moveState.error}</Alert>}
 
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between gap-3">
           <p className="text-xs text-muted">
             {scene.provider ?? "unknown"}/{scene.model ?? "unknown"} · v{scene.version}
           </p>
-          <button
-            type="submit"
-            disabled={pending}
-            className="h-11 rounded-lg border border-border px-4 text-sm font-medium hover:bg-surface-raised disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            {pending ? "Saving..." : "Save changes"}
-          </button>
+          <Button type="submit" variant="secondary" size="sm" pending={pending} pendingLabel="Saving…">
+            Save changes
+          </Button>
         </div>
       </form>
     </div>

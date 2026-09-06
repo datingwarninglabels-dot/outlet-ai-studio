@@ -1,8 +1,9 @@
-import { auth } from "@/auth";
-import { db } from "@/db";
-import { projects } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { redirect } from "next/navigation";
+import { auth } from "@/auth";
+import { Button, EmptyState, PageHeader } from "@/components/ui";
+import { db } from "@/db";
+import { projects } from "@/db/schema";
 import { MEDIA_CATEGORIES } from "@/lib/media-categories";
 import {
   getMediaAssetUrl,
@@ -59,18 +60,14 @@ export default async function MediaLibraryPage({
   );
 
   return (
-    <div className="flex max-w-4xl flex-col gap-8">
-      <div>
-        <h1 className="text-2xl font-semibold">Media Library</h1>
-        <p className="mt-1 text-sm text-muted">
-          Every generated and uploaded asset in one place — private by default, signed URLs only.
-          Upload your own photos, art, videos, music, sound effects, voice recordings, scripts, and
-          subtitle files for reuse across projects.
-        </p>
-      </div>
+    <div className="flex max-w-4xl flex-col gap-6">
+      <PageHeader
+        title="Media"
+        description="Every generated and uploaded asset in one place — private by default, signed URLs only. Upload your own photos, art, videos, music, sound effects, voice recordings, scripts, and subtitle files for reuse across projects."
+      />
 
-      <section className="flex flex-col gap-3 rounded-lg border border-border bg-surface p-4">
-        <h2 className="text-sm font-medium text-muted">Storage usage</h2>
+      <section className="flex flex-col gap-3 rounded-xl border border-border bg-surface p-4">
+        <h2 className="text-sm font-semibold text-muted">Storage usage</h2>
         <p className="text-sm">Total: {formatBytes(usage.totalBytes)}</p>
         {usage.byProject.length > 0 && (
           <ul className="flex flex-col gap-1 text-xs text-muted">
@@ -90,15 +87,15 @@ export default async function MediaLibraryPage({
       <MediaUploadForm projects={ownedProjects} />
 
       <form method="get" className="flex flex-wrap items-end gap-3">
-        <div className="flex flex-col gap-1">
-          <label htmlFor="project" className="text-xs text-muted">
+        <div className="flex flex-col gap-1.5">
+          <label htmlFor="project" className="text-sm font-medium text-foreground">
             Filter by project
           </label>
           <select
             id="project"
             name="project"
             defaultValue={projectFilter ?? ""}
-            className="h-11 rounded-lg border border-border bg-surface px-3 text-sm outline-none focus-visible:border-accent-teal"
+            className="h-11 rounded-lg border border-border bg-surface px-3 text-sm outline-none focus-visible:border-accent"
           >
             <option value="">All</option>
             {ownedProjects.map((p) => (
@@ -108,15 +105,15 @@ export default async function MediaLibraryPage({
             ))}
           </select>
         </div>
-        <div className="flex flex-col gap-1">
-          <label htmlFor="category" className="text-xs text-muted">
+        <div className="flex flex-col gap-1.5">
+          <label htmlFor="category" className="text-sm font-medium text-foreground">
             Filter by category
           </label>
           <select
             id="category"
             name="category"
             defaultValue={categoryFilter ?? ""}
-            className="h-11 rounded-lg border border-border bg-surface px-3 text-sm outline-none focus-visible:border-accent-teal"
+            className="h-11 rounded-lg border border-border bg-surface px-3 text-sm outline-none focus-visible:border-accent"
           >
             <option value="">All (includes generated media)</option>
             {MEDIA_CATEGORIES.map((c) => (
@@ -126,18 +123,13 @@ export default async function MediaLibraryPage({
             ))}
           </select>
         </div>
-        <button
-          type="submit"
-          className="h-11 rounded-lg border border-border px-4 text-sm hover:bg-surface-raised"
-        >
+        <Button type="submit" variant="secondary">
           Apply filters
-        </button>
+        </Button>
       </form>
 
       {assetCards.length === 0 ? (
-        <p className="rounded-lg border border-dashed border-border p-6 text-sm text-muted">
-          No media matches these filters.
-        </p>
+        <EmptyState title="No media matches these filters" description="Clear the filters or upload a file above." />
       ) : (
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">
           {assetCards.map(({ asset, url }) => (

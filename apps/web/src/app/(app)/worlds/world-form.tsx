@@ -1,6 +1,7 @@
 "use client";
 
 import { useActionState } from "react";
+import { Alert, Button, Field, Input, Textarea, useActionToast } from "@/components/ui";
 
 const initialState = { error: "" };
 
@@ -21,52 +22,23 @@ type Defaults = Partial<{
   negativePrompt: string;
 }>;
 
-function Field({ label, name, defaultValue, required }: { label: string; name: string; defaultValue?: string; required?: boolean }) {
-  return (
-    <div className="flex flex-col gap-1">
-      <label htmlFor={name} className="text-xs text-muted">
-        {label}
-      </label>
-      <input
-        id={name}
-        name={name}
-        defaultValue={defaultValue ?? ""}
-        required={required}
-        maxLength={300}
-        className="h-11 rounded-lg border border-border bg-surface px-3 text-sm outline-none focus-visible:border-accent-teal"
-      />
-    </div>
-  );
-}
-
-function TextArea({
+function TextField({
   label,
   name,
   defaultValue,
   required,
-  rows = 3,
+  optional,
 }: {
   label: string;
   name: string;
   defaultValue?: string;
   required?: boolean;
-  rows?: number;
+  optional?: boolean;
 }) {
   return (
-    <div className="flex flex-col gap-1">
-      <label htmlFor={name} className="text-xs text-muted">
-        {label}
-      </label>
-      <textarea
-        id={name}
-        name={name}
-        defaultValue={defaultValue ?? ""}
-        required={required}
-        rows={rows}
-        maxLength={name === "description" ? 1000 : 500}
-        className="rounded-lg border border-border bg-surface px-3 py-2 text-sm outline-none focus-visible:border-accent-teal"
-      />
-    </div>
+    <Field id={name} label={label} optional={optional}>
+      <Input name={name} defaultValue={defaultValue ?? ""} required={required} maxLength={300} />
+    </Field>
   );
 }
 
@@ -86,32 +58,39 @@ export function WorldForm({
   assignedCharacterIds: string[];
 }) {
   const [state, formAction, pending] = useActionState(action, initialState);
+  useActionToast(state, pending, "World saved.");
   const assignedSet = new Set(assignedCharacterIds);
 
   return (
     <form action={formAction} className="flex flex-col gap-4">
       {worldId && <input type="hidden" name="worldId" value={worldId} />}
 
-      <Field label="Name" name="name" defaultValue={defaults?.name} required />
-      <TextArea label="Description" name="description" defaultValue={defaults?.description} required rows={2} />
+      <TextField label="Name" name="name" defaultValue={defaults?.name} required />
+      <Field id="description" label="Description">
+        <Textarea name="description" defaultValue={defaults?.description ?? ""} required rows={2} maxLength={1000} />
+      </Field>
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-        <Field label="Location" name="locationDescription" defaultValue={defaults?.locationDescription} />
-        <Field label="Props / vehicles" name="propsVehicles" defaultValue={defaults?.propsVehicles} />
-        <Field label="Typical outfits / accessories" name="outfitsAccessories" defaultValue={defaults?.outfitsAccessories} />
-        <Field label="Lighting / color palette" name="lightingPalette" defaultValue={defaults?.lightingPalette} />
-        <Field label="Camera / lens style" name="cameraStyle" defaultValue={defaults?.cameraStyle} />
-        <Field label="Animation / realism style" name="animationStyle" defaultValue={defaults?.animationStyle} />
-        <Field label="Time of day" name="timeOfDay" defaultValue={defaults?.timeOfDay} />
-        <Field label="Weather" name="weather" defaultValue={defaults?.weather} />
+        <TextField label="Location" name="locationDescription" defaultValue={defaults?.locationDescription} />
+        <TextField label="Props / vehicles" name="propsVehicles" defaultValue={defaults?.propsVehicles} />
+        <TextField
+          label="Typical outfits / accessories"
+          name="outfitsAccessories"
+          defaultValue={defaults?.outfitsAccessories}
+        />
+        <TextField label="Lighting / color palette" name="lightingPalette" defaultValue={defaults?.lightingPalette} />
+        <TextField label="Camera / lens style" name="cameraStyle" defaultValue={defaults?.cameraStyle} />
+        <TextField label="Animation / realism style" name="animationStyle" defaultValue={defaults?.animationStyle} />
+        <TextField label="Time of day" name="timeOfDay" defaultValue={defaults?.timeOfDay} />
+        <TextField label="Weather" name="weather" defaultValue={defaults?.weather} />
       </div>
 
-      <Field label="Negative prompt (optional)" name="negativePrompt" defaultValue={defaults?.negativePrompt} />
+      <TextField label="Negative prompt" name="negativePrompt" defaultValue={defaults?.negativePrompt} optional />
 
       <div className="flex flex-col gap-2">
-        <p className="text-xs text-muted">Characters who typically appear in this world</p>
+        <p className="text-sm font-medium text-foreground">Characters who typically appear in this world</p>
         {ownedCharacters.length === 0 ? (
-          <p className="text-xs text-muted">No characters yet — create one in the Character Library first.</p>
+          <p className="text-xs text-muted">No characters yet — create one in Characters first.</p>
         ) : (
           <div className="flex flex-wrap gap-3">
             {ownedCharacters.map((c) => (
@@ -124,19 +103,11 @@ export function WorldForm({
         )}
       </div>
 
-      {state.error && (
-        <p role="alert" className="text-sm text-red-400">
-          {state.error}
-        </p>
-      )}
+      {state.error && <Alert tone="danger">{state.error}</Alert>}
 
-      <button
-        type="submit"
-        disabled={pending}
-        className="h-11 w-fit rounded-lg bg-gradient-to-r from-accent-purple via-accent-blue to-accent-teal px-4 font-medium text-black disabled:cursor-not-allowed disabled:opacity-60"
-      >
-        {pending ? "Saving..." : submitLabel}
-      </button>
+      <Button type="submit" pending={pending} pendingLabel="Saving…" className="w-fit">
+        {submitLabel}
+      </Button>
     </form>
   );
 }

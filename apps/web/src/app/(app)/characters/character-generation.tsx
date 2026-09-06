@@ -1,6 +1,7 @@
 "use client";
 
 import { useActionState, useState } from "react";
+import { Alert, Button, useActionToast } from "@/components/ui";
 import { requestCharacterSheet, requestConsistencyTest } from "./actions";
 
 const initialState = { error: "" };
@@ -14,23 +15,23 @@ export function GenerateCharacterSheetForm({
 }) {
   const [state, formAction, pending] = useActionState(requestCharacterSheet, initialState);
   const [idempotencyKey] = useState(() => crypto.randomUUID());
+  useActionToast(state, pending, "Character sheet requested — confirm the cost estimate to start.");
 
   return (
     <form action={formAction} className="flex flex-col gap-2">
       <input type="hidden" name="characterId" value={characterId} />
       <input type="hidden" name="idempotencyKey" value={idempotencyKey} />
-      {state.error && (
-        <p role="alert" className="text-xs text-red-400">
-          {state.error}
-        </p>
-      )}
-      <button
+      {state.error && <Alert tone="danger">{state.error}</Alert>}
+      <Button
         type="submit"
-        disabled={pending || Boolean(disabledReason)}
-        className="h-11 w-fit rounded-lg bg-gradient-to-r from-accent-purple via-accent-blue to-accent-teal px-4 text-sm font-medium text-black disabled:cursor-not-allowed disabled:opacity-60"
+        size="sm"
+        pending={pending}
+        pendingLabel="Estimating cost…"
+        disabled={Boolean(disabledReason)}
+        className="w-fit"
       >
-        {pending ? "Estimating cost..." : "Generate character sheet (front/side/close-up/full-body)"}
-      </button>
+        Generate character sheet (front/side/close-up/full-body)
+      </Button>
     </form>
   );
 }
@@ -44,23 +45,24 @@ export function RunConsistencyTestForm({
 }) {
   const [state, formAction, pending] = useActionState(requestConsistencyTest, initialState);
   const [idempotencyKey] = useState(() => crypto.randomUUID());
+  useActionToast(state, pending, "Consistency test requested — confirm the cost estimate to start.");
 
   return (
     <form action={formAction} className="flex flex-col gap-2">
       <input type="hidden" name="characterId" value={characterId} />
       <input type="hidden" name="idempotencyKey" value={idempotencyKey} />
-      {state.error && (
-        <p role="alert" className="text-xs text-red-400">
-          {state.error}
-        </p>
-      )}
-      <button
+      {state.error && <Alert tone="danger">{state.error}</Alert>}
+      <Button
         type="submit"
-        disabled={pending || Boolean(disabledReason)}
-        className="h-11 w-fit rounded-lg border border-border px-4 text-sm hover:bg-surface-raised disabled:cursor-not-allowed disabled:opacity-60"
+        variant="secondary"
+        size="sm"
+        pending={pending}
+        pendingLabel="Estimating cost…"
+        disabled={Boolean(disabledReason)}
+        className="w-fit"
       >
-        {pending ? "Estimating cost..." : "Run consistency test (1 cheap image)"}
-      </button>
+        Run consistency test (1 cheap image)
+      </Button>
     </form>
   );
 }

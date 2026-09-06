@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { auth } from "@/auth";
+import { EmptyState, PageHeader } from "@/components/ui";
 import { listOwnedCharacters } from "../characters/actions";
 import { createWorld, listOwnedWorlds } from "./actions";
 import { WorldForm } from "./world-form";
@@ -8,24 +9,20 @@ export const dynamic = "force-dynamic";
 
 export default async function WorldsPage() {
   const session = await auth();
-  const ownedWorlds = session?.user ? await listOwnedWorlds(session.user.id) : [];
-  const ownedCharacters = session?.user ? await listOwnedCharacters(session.user.id) : [];
+  const [ownedWorlds, ownedCharacters] = session?.user
+    ? await Promise.all([listOwnedWorlds(session.user.id), listOwnedCharacters(session.user.id)])
+    : [[], []];
 
   return (
-    <div className="flex max-w-2xl flex-col gap-8">
-      <div>
-        <h1 className="text-2xl font-semibold">World Library</h1>
-        <p className="mt-1 text-sm text-muted">
-          Reusable settings with locked location, lighting, camera, and style details — upload or
-          generate reference images, approve them, and assign the characters who appear here. Assign
-          a world to a scene on its project page to keep visuals consistent and get continuity
-          warnings if a generated image drifts from the locked details.
-        </p>
-      </div>
+    <div className="flex max-w-2xl flex-col gap-6">
+      <PageHeader
+        title="Worlds"
+        description="Reusable settings with locked location, lighting, camera, and style details. Upload or generate reference images, approve them, and assign the characters who appear here. Assign a world to a scene to keep visuals consistent and get continuity warnings if a generated image drifts."
+      />
 
-      <details className="rounded-lg border border-border bg-surface p-4">
-        <summary className="cursor-pointer text-sm font-medium">New world</summary>
-        <div className="mt-4">
+      <details className="rounded-xl border border-border bg-surface">
+        <summary className="cursor-pointer px-4 py-3 text-sm font-medium text-foreground">New world</summary>
+        <div className="border-t border-border p-4">
           <WorldForm
             action={createWorld}
             submitLabel="Create world"
@@ -36,16 +33,16 @@ export default async function WorldsPage() {
       </details>
 
       {ownedWorlds.length === 0 ? (
-        <p className="rounded-lg border border-dashed border-border p-6 text-sm text-muted">No worlds yet.</p>
+        <EmptyState title="No worlds yet" description="Create one above to reuse it across projects." />
       ) : (
         <ul className="flex flex-col gap-2">
           {ownedWorlds.map((world) => (
             <li key={world.id}>
               <Link
                 href={`/worlds/${world.id}`}
-                className="flex items-center justify-between rounded-lg border border-border bg-surface p-4 text-sm hover:bg-surface-raised"
+                className="flex items-center justify-between gap-3 rounded-xl border border-border bg-surface p-4 text-sm transition-colors hover:border-border-strong hover:bg-surface-raised"
               >
-                <span>{world.name}</span>
+                <span className="font-medium text-foreground">{world.name}</span>
                 <span className="max-w-xs truncate text-xs text-muted">{world.description}</span>
               </Link>
             </li>

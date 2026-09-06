@@ -11,6 +11,16 @@ export const setupSchema = z.object({
   password: z.string().min(12),
 });
 
+export const updateProfileSchema = z.object({
+  name: z.string().min(1, "Enter a name.").max(100),
+});
+
+export const changePasswordSchema = z.object({
+  currentPassword: z.string().min(1, "Enter your current password."),
+  // Same bar as account creation.
+  newPassword: z.string().min(12, "New password must be at least 12 characters."),
+});
+
 export const registerSchema = z.object({
   name: z.string().min(1).max(100),
   email: z.string().email(),

@@ -1,15 +1,16 @@
 "use client";
 
 import { useActionState, useState } from "react";
+import { Alert, Button, Field, Select, Textarea } from "@/components/ui";
 import { PAYWALL_MESSAGE } from "@/lib/paywall-message";
 import { PLATFORMS } from "@/lib/validation";
 import { requestScript } from "./actions";
 import { Paywall } from "../paywall";
 
 const MODES = [
-  { value: "quick", label: "Quick", description: "AI makes sensible choices with minimal questions." },
-  { value: "guided", label: "Guided", description: "You approve the script before anything else happens." },
-  { value: "studio", label: "Studio", description: "Full manual control over scenes and settings." },
+  { value: "quick", label: "Quick", description: "AI makes sensible choices — you review the finished script." },
+  { value: "guided", label: "Guided", description: "You approve the script before storyboard, voice, or visuals run." },
+  { value: "studio", label: "Studio", description: "Full manual control over every scene and setting." },
 ] as const;
 
 const initialState = { error: "" };
@@ -23,96 +24,74 @@ export function CreateVideoForm({
 }) {
   const [state, formAction, pending] = useActionState(requestScript, initialState);
   const [idempotencyKey] = useState(() => crypto.randomUUID());
+  const paywalled = state.error === PAYWALL_MESSAGE;
 
   return (
     <form action={formAction} className="flex max-w-xl flex-col gap-6">
       <input type="hidden" name="idempotencyKey" value={idempotencyKey} />
 
       {!scriptProviderConfigured && (
-        <p className="rounded-lg border border-dashed border-border p-4 text-sm text-muted">
-          Script generation isn&apos;t connected yet — add <code>ANTHROPIC_API_KEY</code> to your
-          environment and restart the app to enable this form.
-        </p>
+        <Alert tone="warning" title="Script generation isn't connected yet">
+          Add <code className="font-mono text-xs">ANTHROPIC_API_KEY</code> to your environment and restart the app to
+          enable this form.
+        </Alert>
       )}
 
-      <p className="text-xs text-muted">
-        This creates the project and shows you an estimated cost before anything is generated —
-        nothing is charged until you confirm on the next screen.
-      </p>
+      <Alert tone="info">
+        This creates the project and shows an estimated cost before anything is generated — nothing is charged until
+        you confirm on the next screen.
+      </Alert>
 
-      <div className="flex flex-col gap-1.5">
-        <label htmlFor="idea" className="text-sm font-medium">
-          What do you want to create?
-        </label>
-        <textarea
-          id="idea"
+      <Field
+        id="idea"
+        label="What do you want to create?"
+        hint="Describe the video in a sentence or two — topic, length, and tone."
+      >
+        <Textarea
           name="idea"
           required
           minLength={3}
           maxLength={2000}
           rows={4}
           placeholder="A 45-second video about dating warning signs, with a warm and direct tone."
-          className="rounded-lg border border-border bg-surface px-3 py-2 text-sm outline-none focus-visible:border-accent-teal"
         />
-      </div>
+      </Field>
 
-      <div className="flex flex-col gap-1.5">
-        <label htmlFor="platform" className="text-sm font-medium">
-          Platform
-        </label>
-        <select
-          id="platform"
-          name="platform"
-          defaultValue={defaultPlatform}
-          className="h-11 rounded-lg border border-border bg-surface px-3 text-sm outline-none focus-visible:border-accent-teal"
-        >
+      <Field id="platform" label="Platform">
+        <Select name="platform" defaultValue={defaultPlatform}>
           {PLATFORMS.map((platform) => (
             <option key={platform} value={platform}>
               {platform}
             </option>
           ))}
-        </select>
-      </div>
+        </Select>
+      </Field>
 
       <fieldset className="flex flex-col gap-2">
-        <legend className="text-sm font-medium">Mode</legend>
+        <legend className="text-sm font-medium text-foreground">Mode</legend>
         {MODES.map((mode) => (
           <label
             key={mode.value}
-            className="flex cursor-pointer items-start gap-3 rounded-lg border border-border bg-surface p-3 text-sm has-[:checked]:border-accent-teal"
+            className="flex cursor-pointer items-start gap-3 rounded-lg border border-border bg-surface p-3 text-sm transition-colors has-[:checked]:border-accent has-[:checked]:bg-accent-soft"
           >
-            <input
-              type="radio"
-              name="mode"
-              value={mode.value}
-              defaultChecked={mode.value === "quick"}
-              className="mt-0.5"
-            />
+            <input type="radio" name="mode" value={mode.value} defaultChecked={mode.value === "quick"} className="mt-0.5" />
             <span>
-              <span className="font-medium">{mode.label}</span>
+              <span className="font-medium text-foreground">{mode.label}</span>
               <span className="block text-muted">{mode.description}</span>
             </span>
           </label>
         ))}
       </fieldset>
 
-      {state.error === PAYWALL_MESSAGE ? (
+      {paywalled ? (
         <Paywall compact />
       ) : (
-        state.error && (
-          <p role="alert" className="text-sm text-red-400">
-            {state.error}
-          </p>
-        )
+        state.error && <Alert tone="danger">{state.error}</Alert>
       )}
 
-      <button
-        type="submit"
-        disabled={pending || !scriptProviderConfigured}
-        className="h-11 rounded-lg bg-gradient-to-r from-accent-purple via-accent-blue to-accent-teal font-medium text-black disabled:cursor-not-allowed disabled:opacity-60"
-      >
-        {pending ? "Setting up..." : "Continue"}
-      </button>
+      <Button type="submit" pending={pending} pendingLabel="Setting up…" disabled={!scriptProviderConfigured}>
+        Continue
+      </Button>
     </form>
   );
 }

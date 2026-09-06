@@ -1,4 +1,4 @@
-import Link from "next/link";
+import { Button } from "@/components/ui";
 
 export default function AppNotFound() {
   return (
@@ -7,12 +7,9 @@ export default function AppNotFound() {
       <p className="max-w-sm text-sm text-muted">
         This page, or whatever it was pointing at, doesn&apos;t exist or you don&apos;t have access to it.
       </p>
-      <Link
-        href="/dashboard"
-        className="mt-2 flex h-11 items-center rounded-lg bg-gradient-to-r from-accent-purple via-accent-blue to-accent-teal px-5 text-sm font-medium text-black"
-      >
+      <Button href="/dashboard" className="mt-2">
         Go to dashboard
-      </Link>
+      </Button>
     </div>
   );
 }

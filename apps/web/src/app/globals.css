@@ -5,48 +5,61 @@
   --surface: #14161c;
   --surface-raised: #1b1e26;
   --border: #2a2d38;
+  --border-strong: #3a3e4c;
   --foreground: #f2f2f5;
-  --muted: #9498a8;
+  /* Raised from #9498a8 — small muted text sits on --surface and
+     --surface-raised all over the app; this clears WCAG AA (4.5:1) on
+     both, where the old value was borderline on the raised surface. */
+  --muted: #aab0c0;
   --accent-purple: #8b5cf6;
   --accent-blue: #3b82f6;
   --accent-teal: #2dd4bf;
-  /* Semantic accent tokens — unused by the authenticated app today (it
-     still references accent-purple/blue/teal directly), defined here with
-     a neutral fallback so the utility classes below always resolve to
-     something reasonable even outside the marketing scope. The public
-     marketing page overrides all of these to a warm palette (see
-     [data-brand="marketing"] below) — deliberately named generically
-     rather than e.g. --accent-amber, so a later pass can point the
-     authenticated app at the same names without a component rewrite,
-     per the landing-page brief's brand-direction requirement. */
+
+  /* Semantic accent tokens. The authenticated app now points at these
+     (not accent-purple/blue/teal directly) so it shares one component
+     set and interaction language with the marketing page — which
+     overrides only the accent values below to a warm palette. The
+     tri-colour gradient that used to mark every primary button is
+     retired: it read as generic AI-generated design. */
   --accent: var(--accent-teal);
-  --accent-strong: var(--accent-blue);
+  --accent-strong: #14b8a6;
   --accent-soft: color-mix(in srgb, var(--accent-teal) 14%, transparent);
-  --accent-foreground: #0b0c10;
+  --accent-foreground: #06231f;
+
+  /* Status tokens — replace scattered raw text-red-400 / text-amber-400 /
+     text-accent-teal. Not brand-specific, so defined once here and never
+     overridden per brand. Each *-soft is a translucent fill for the
+     matching Alert / Badge background. */
+  --danger: #f87171;
+  --danger-soft: color-mix(in srgb, #f87171 13%, transparent);
+  --success: #34d399;
+  --success-soft: color-mix(in srgb, #34d399 13%, transparent);
+  --warning: #fbbf24;
+  --warning-soft: color-mix(in srgb, #fbbf24 13%, transparent);
+
+  --ring: var(--accent);
 }
 
 /* Public marketing brand — warm amber/copper on a warm-neutral near-black,
-   distinct from the authenticated app's cool purple/blue/teal (which is
-   also, worth naming, one of the specific looks that reads as generic
-   AI-generated design — this is a deliberate departure, not an oversight).
-   Shared foundations (spacing, radii, card construction, type scale,
-   interaction patterns, accessibility standards) are NOT redefined here —
-   marketing components reuse the exact same Tailwind utilities and
-   component idioms as the rest of the app, just against these token
-   values instead. Applied via a data attribute on the (marketing) route
-   group's root element, not a class, so it composes cleanly with the
-   dark-mode class already set on <html>. */
+   distinct from the authenticated app's cool teal. Shared foundations
+   (spacing, radii, card construction, type scale, interaction patterns,
+   accessibility standards, the ui/ component set) are NOT redefined here —
+   marketing reuses the exact same components and utilities, just against
+   these accent/surface values. Applied via a data attribute on the
+   (marketing) route group's root element so it composes with the
+   dark-mode class already on <html>. */
 [data-brand="marketing"] {
   --background: #15110d;
   --surface: #1c1712;
   --surface-raised: #241d16;
   --border: #382d21;
+  --border-strong: #4a3c2c;
   --foreground: #f5efe5;
-  --muted: #a89a86;
+  --muted: #b8a892;
   --accent: #e08a3c;
   --accent-strong: #c76a24;
   --accent-soft: color-mix(in srgb, #e08a3c 14%, transparent);
-  --accent-foreground: #15110d;
+  --accent-foreground: #1a1206;
 }
 
 @theme inline {
@@ -54,6 +67,7 @@
   --color-surface: var(--surface);
   --color-surface-raised: var(--surface-raised);
   --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
   --color-foreground: var(--foreground);
   --color-muted: var(--muted);
   --color-accent-purple: var(--accent-purple);
@@ -63,6 +77,12 @@
   --color-accent-strong: var(--accent-strong);
   --color-accent-soft: var(--accent-soft);
   --color-accent-foreground: var(--accent-foreground);
+  --color-danger: var(--danger);
+  --color-danger-soft: var(--danger-soft);
+  --color-success: var(--success);
+  --color-success-soft: var(--success-soft);
+  --color-warning: var(--warning);
+  --color-warning-soft: var(--warning-soft);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }
@@ -74,12 +94,8 @@ body {
 }
 
 :focus-visible {
-  outline: 2px solid var(--accent-teal);
+  outline: 2px solid var(--ring);
   outline-offset: 2px;
-}
-
-[data-brand="marketing"] :focus-visible {
-  outline-color: var(--accent-strong);
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -90,5 +106,16 @@ body {
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
+  }
+}
+
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(0.5rem);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
   }
 }

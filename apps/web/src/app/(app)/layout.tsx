@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { auth } from "@/auth";
+import { ToastProvider } from "@/components/ui";
 import { NAV_ITEMS } from "@/lib/nav";
 import { AppShell } from "./app-shell";
 
@@ -16,8 +17,10 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   const navItems = NAV_ITEMS.filter((item) => !item.ownerOnly || session.user.role === "owner");
 
   return (
-    <AppShell navItems={navItems} userEmail={session.user.email ?? ""}>
-      {children}
-    </AppShell>
+    <ToastProvider>
+      <AppShell navItems={navItems} userEmail={session.user.email ?? ""}>
+        {children}
+      </AppShell>
+    </ToastProvider>
   );
 }

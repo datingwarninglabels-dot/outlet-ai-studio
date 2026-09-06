@@ -1,8 +1,9 @@
 "use client";
 
 import { useActionState, useState } from "react";
-import { Alert, Button, useActionToast } from "@/components/ui";
+import { Button, useActionToast } from "@/components/ui";
 import { requestAnimation } from "./actions";
+import { GenerateError } from "./generate-error";
 
 const initialState = { error: "" };
 
@@ -22,7 +23,8 @@ export function GenerateAnimationForm({
       <input type="hidden" name="projectId" value={projectId} />
       <input type="hidden" name="idempotencyKey" value={idempotencyKey} />
       {disabledReason && <p className="text-sm text-muted">{disabledReason}</p>}
-      {state.error && <Alert tone="danger">{state.error}</Alert>}
+      <GenerateError error={state.error} />
+
       <Button
         type="submit"
         pending={pending}

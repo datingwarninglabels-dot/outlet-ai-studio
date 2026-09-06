@@ -3,6 +3,7 @@
 import { useActionState, useState } from "react";
 import { Alert, Button, Field, Input, Select, Textarea, useActionToast } from "@/components/ui";
 import { moveScene, requestStoryboard, updateScene } from "./actions";
+import { GenerateError } from "./generate-error";
 
 const initialState = { error: "" };
 
@@ -24,7 +25,7 @@ export function GenerateStoryboardForm({
       <input type="hidden" name="projectId" value={projectId} />
       <input type="hidden" name="idempotencyKey" value={idempotencyKey} />
       {disabledReason && <p className="text-sm text-muted">{disabledReason}</p>}
-      {state.error && <Alert tone="danger">{state.error}</Alert>}
+      <GenerateError error={state.error} />
       <Button
         type="submit"
         pending={pending}

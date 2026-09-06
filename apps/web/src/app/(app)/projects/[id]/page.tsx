@@ -15,7 +15,7 @@ import {
 } from "@/db/schema";
 import { isStalled } from "@/lib/jobs";
 import { jobStatusLabel, jobStatusTone, jobTypeLabel } from "@/lib/labels";
-import { derivePipeline } from "@/lib/pipeline";
+import { derivePipeline, type PipelineStepState } from "@/lib/pipeline";
 import { assemblyProvider, imageProvider, storyboardProvider, ttsProvider, videoProvider } from "@/lib/providers";
 import { storageProvider } from "@/lib/storage-instance";
 import { loadOwnedProject } from "@/lib/authz";
@@ -63,6 +63,78 @@ import { GenerateVisualForm } from "./visual-form";
 import { GenerateVoiceForm } from "./voice-form";
 
 const SECTION_CLASS = "scroll-mt-28 flex flex-col gap-3 outline-none";
+
+const STATE_TONE: Record<PipelineStepState, "neutral" | "accent" | "success" | "warning" | "danger"> = {
+  locked: "neutral",
+  ready: "accent",
+  awaiting_confirmation: "warning",
+  running: "accent",
+  failed: "danger",
+  done: "success",
+};
+
+const STATE_TEXT: Record<PipelineStepState, string> = {
+  locked: "Locked",
+  ready: "Ready",
+  awaiting_confirmation: "Confirm cost",
+  running: "Running",
+  failed: "Failed",
+  done: "Done",
+};
+
+/**
+ * One pipeline section. A completed step that isn't the one the user is
+ * working on renders collapsed (summary + status) so a long project isn't
+ * a wall of forms; everything else renders open.
+ */
+function StepSection({
+  id,
+  title,
+  state,
+  children,
+}: {
+  id: string;
+  title: string;
+  state: PipelineStepState;
+  children: React.ReactNode;
+}) {
+  const heading = (
+    <div className="flex items-center justify-between gap-3">
+      <h2 className="text-sm font-semibold text-muted">{title}</h2>
+      <Badge tone={STATE_TONE[state]} dot>
+        {STATE_TEXT[state]}
+      </Badge>
+    </div>
+  );
+
+  if (state !== "done") {
+    return (
+      <section id={`step-${id}`} tabIndex={-1} className={SECTION_CLASS}>
+        {heading}
+        {children}
+      </section>
+    );
+  }
+
+  return (
+    <section id={`step-${id}`} tabIndex={-1} className={SECTION_CLASS}>
+      <details className="group">
+        <summary className="flex cursor-pointer list-none items-center justify-between gap-3">
+          <span className="flex items-center gap-2">
+            <span aria-hidden="true" className="text-muted transition-transform group-open:rotate-90">
+              ›
+            </span>
+            <h2 className="text-sm font-semibold text-muted">{title}</h2>
+          </span>
+          <Badge tone="success" dot>
+            Done
+          </Badge>
+        </summary>
+        <div className="mt-3 flex flex-col gap-3">{children}</div>
+      </details>
+    </section>
+  );
+}
 
 export default async function ProjectDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -236,6 +308,7 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
       thumbnail: thumbnailJob ? { type: thumbnailJob.type, status: thumbnailJob.status } : undefined,
     },
   });
+  const stepState = new Map(pipeline.map((s) => [s.id, s.state] as const));
 
   return (
     <div className="flex max-w-2xl flex-col gap-6">
@@ -259,8 +332,7 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
         brandKitDefaultVoiceId={brandKit.defaultVoiceId ?? ""}
       />
 
-      <section id="step-script" tabIndex={-1} className={SECTION_CLASS}>
-        <h2 className="text-sm font-semibold text-muted">Script</h2>
+      <StepSection id="script" title="Script" state={stepState.get("script")!}>
         {scriptJob?.status === "awaiting_confirmation" && scriptCost && (
           <JobConfirmCard
             jobId={scriptJob.id}
@@ -298,11 +370,9 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
             </p>
           )
         )}
-      </section>
+      </StepSection>
 
-      <section id="step-storyboard" tabIndex={-1} className={SECTION_CLASS}>
-        <h2 className="text-sm font-semibold text-muted">Storyboard</h2>
-
+      <StepSection id="storyboard" title="Storyboard" state={stepState.get("storyboard")!}>
         {storyboardJob?.status === "awaiting_confirmation" && storyboardCost && (
           <JobConfirmCard
             jobId={storyboardJob.id}
@@ -392,11 +462,9 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
             </div>
           )
         )}
-      </section>
+      </StepSection>
 
-      <section id="step-voice" tabIndex={-1} className={SECTION_CLASS}>
-        <h2 className="text-sm font-semibold text-muted">Voice</h2>
-
+      <StepSection id="voice" title="Voice" state={stepState.get("voice")!}>
         {voiceJob?.status === "awaiting_confirmation" && voiceCost && (
           <JobConfirmCard
             jobId={voiceJob.id}
@@ -448,11 +516,9 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
             </div>
           )
         )}
-      </section>
+      </StepSection>
 
-      <section id="step-visual" tabIndex={-1} className={SECTION_CLASS}>
-        <h2 className="text-sm font-semibold text-muted">Visuals</h2>
-
+      <StepSection id="visual" title="Visuals" state={stepState.get("visual")!}>
         {visualJob?.status === "awaiting_confirmation" && visualCost && (
           <JobConfirmCard
             jobId={visualJob.id}
@@ -520,11 +586,9 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
               />
             </div>
           )}
-      </section>
+      </StepSection>
 
-      <section id="step-animation" tabIndex={-1} className={SECTION_CLASS}>
-        <h2 className="text-sm font-semibold text-muted">Animation</h2>
-
+      <StepSection id="animation" title="Animation" state={stepState.get("animation")!}>
         {animationJob?.status === "awaiting_confirmation" && animationCost && (
           <JobConfirmCard
             jobId={animationJob.id}
@@ -586,11 +650,9 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
             </div>
           )
         )}
-      </section>
+      </StepSection>
 
-      <section id="step-assembly" tabIndex={-1} className={SECTION_CLASS}>
-        <h2 className="text-sm font-semibold text-muted">Final video</h2>
-
+      <StepSection id="assembly" title="Final video" state={stepState.get("assembly")!}>
         {assemblyJob?.status === "awaiting_confirmation" && assemblyCost && (
           <JobConfirmCard
             jobId={assemblyJob.id}
@@ -641,11 +703,9 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
             </div>
           )
         )}
-      </section>
+      </StepSection>
 
-      <section id="step-thumbnail" tabIndex={-1} className={SECTION_CLASS}>
-        <h2 className="text-sm font-semibold text-muted">Thumbnails</h2>
-
+      <StepSection id="thumbnail" title="Thumbnails" state={stepState.get("thumbnail")!}>
         {thumbnailJob?.status === "awaiting_confirmation" && thumbnailCost && (
           <JobConfirmCard
             jobId={thumbnailJob.id}
@@ -699,7 +759,7 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
             />
           </div>
         )}
-      </section>
+      </StepSection>
 
       <section className={SECTION_CLASS}>
         <h2 className="text-sm font-semibold text-muted">Export</h2>

@@ -4,6 +4,7 @@ import { useActionState, useState } from "react";
 import { Alert, Button, Input, useActionToast } from "@/components/ui";
 import { THUMBNAIL_STYLES } from "@/lib/validation";
 import { requestThumbnails, updateThumbnailText } from "./thumbnail-actions";
+import { GenerateError } from "./generate-error";
 
 const initialState = { error: "" };
 
@@ -42,7 +43,7 @@ export function GenerateThumbnailsForm({
           ))}
         </div>
       </fieldset>
-      {state.error && <Alert tone="danger">{state.error}</Alert>}
+      <GenerateError error={state.error} />
       <Button
         type="submit"
         pending={pending}
